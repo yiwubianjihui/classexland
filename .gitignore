@@ -1,0 +1,14 @@
+bin/
+obj/
+cipx/
+*.user
+.vs/
+.idea/
+TestResults/
+
+# 构建日志（本地排障用，不入库）
+*.log
+build*.log
+
+# 本地运行产物
+data/

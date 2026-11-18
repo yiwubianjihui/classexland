@@ -1,0 +1,24 @@
+<ci:ComponentBase x:Class="ClassExland.Features.Duty.Controls.DutyComponentSettingsControl"
+                  x:TypeArguments="componentSettings:DutyComponentSettings"
+                  xmlns="https://github.com/avaloniaui"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                  xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                  xmlns:local="clr-namespace:ClassExland.Features.Duty.Controls"
+                  xmlns:componentSettings="clr-namespace:ClassExland.Features.Duty.Models"
+                  mc:Ignorable="d"
+                  d:DesignHeight="220" d:DesignWidth="360">
+    <Grid DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:DutyComponentSettingsControl}}">
+        <StackPanel Spacing="8" MinWidth="280" HorizontalAlignment="Left">
+            <TextBox Watermark="组件标题，如：今日值日" Text="{Binding Settings.Title}"/>
+            <ToggleSwitch Content="仅课间显示（上课时自动隐藏）" IsChecked="{Binding Settings.ShowOnlyOnBreak}"/>
+            <ToggleSwitch Content="放学后继续显示" IsChecked="{Binding Settings.ShowOnAfterSchool}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="单行最多项目数" VerticalAlignment="Center"/>
+                <NumericUpDown Minimum="1" Maximum="10" Increment="1" Width="100"
+                               Value="{Binding Settings.MaxItems}"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</ci:ComponentBase>

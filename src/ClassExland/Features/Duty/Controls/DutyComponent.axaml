@@ -1,0 +1,40 @@
+<ci:ComponentBase x:Class="ClassExland.Features.Duty.Controls.DutyComponent"
+                  x:TypeArguments="componentSettings:DutyComponentSettings"
+                  xmlns="https://github.com/avaloniaui"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                  xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                  xmlns:componentSettings="clr-namespace:ClassExland.Features.Duty.Models"
+                  mc:Ignorable="d"
+                  d:DesignHeight="40" d:DesignWidth="460">
+    <!-- 容器高度写死为 IslandContainerHeight(40)，组件必须严格单行：
+         一旦换成两行，第二行会被容器裁掉，表现为“文字被遮挡”。不写死 FontSize，继承主题字号。 -->
+    <Border x:Name="RootCard"
+            CornerRadius="8"
+            Padding="10,4"
+            IsVisible="True"
+            VerticalAlignment="Center"
+            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6">
+            <TextBlock x:Name="TitleText"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="BadgeText"
+                       VerticalAlignment="Center"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       Opacity="0.6"
+                       IsVisible="False"/>
+            <TextBlock Text="·" Opacity="0.4" VerticalAlignment="Center"/>
+            <TextBlock x:Name="ItemsText"
+                       VerticalAlignment="Center"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+    </Border>
+</ci:ComponentBase>

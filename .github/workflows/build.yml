@@ -1,0 +1,113 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 构建与发版
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 还原依赖
+        run: dotnet restore ClassExland.sln
+
+      - name: 构建（Release）
+        run: dotnet build ClassExland.sln -c Release --no-restore
+
+      - name: 收集 cipx 产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cipx
+          CIPX=$(find src -type f -name '*.cipx' | head -n 1)
+          if [ -z "$CIPX" ]; then
+            echo "::error::未找到 .cipx 构建产物"
+            exit 1
+          fi
+          cp "$CIPX" cipx/ClassExland.cipx
+          echo "cipx: $CIPX -> cipx/ClassExland.cipx"
+
+      - name: 校验包内 manifest.yml 与 csproj 版本一致
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re, sys, zipfile
+          from pathlib import Path
+
+          csproj = Path("src/ClassExland/ClassExland.csproj").read_text(encoding="utf-8-sig")
+          m = re.search(r"<Version>\s*([^<]+?)\s*</Version>", csproj)
+          if not m:
+              sys.exit("csproj: 未找到 <Version>")
+          csproj_ver = m.group(1).strip()
+
+          cipx = Path("cipx/ClassExland.cipx")
+          if not cipx.is_file():
+              sys.exit("未找到 cipx/ClassExland.cipx")
+          with zipfile.ZipFile(cipx) as z:
+              names = [n for n in z.namelist()
+                       if n.replace("\\", "/").split("/")[-1].lower() == "manifest.yml"]
+              if not names:
+                  sys.exit("cipx 包内未找到 manifest.yml")
+              manifest = z.read(names[0]).decode("utf-8-sig")
+
+          mv = re.search(r"(?m)^\s*version:\s*(\S+)\s*$", manifest)
+          if not mv:
+              sys.exit("manifest.yml: 未找到 version")
+          manifest_ver = mv.group(1).strip()
+
+          print(f"csproj={csproj_ver}  manifest={manifest_ver}")
+          if csproj_ver != manifest_ver:
+              sys.exit(f"版本不一致: csproj={csproj_ver} manifest={manifest_ver}")
+          print("版本校验通过")
+          PY
+
+      - name: 检查 tag 与版本是否一致（提示性）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' src/ClassExland/ClassExland.csproj | tr -d '[:space:]')
+          echo "tag=$TAG  csproj=$VER"
+          if [ "$TAG" != "$VER" ]; then
+            echo "::warning::tag 与 csproj 版本不一致，请确认是否故意为之"
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClassExland-${{ github.sha }}
+          path: cipx/ClassExland.cipx
+          if-no-files-found: error
+
+      - name: 生成 SHA256SUMS
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd cipx
+          sha256sum ClassExland.cipx > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cipx/ClassExland.cipx
+            cipx/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true

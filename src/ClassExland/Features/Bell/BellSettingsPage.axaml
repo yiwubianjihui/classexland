@@ -1,0 +1,64 @@
+<ci:SettingsPageBase xmlns="https://github.com/avaloniaui"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                     xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                     x:Class="ClassExland.Features.Bell.BellSettingsPage">
+    <ScrollViewer>
+        <StackPanel Margin="16" Spacing="10">
+            <TextBlock Text="预备铃与虚拟课堂状态" FontSize="18" FontWeight="SemiBold" />
+
+            <CheckBox x:Name="EnableBellCheck" Content="启用预备铃时间轴" />
+            <CheckBox x:Name="HostOverrideCheck" Content="Harmony 宿主状态覆盖（实验性，失败自动降级）" />
+            <TextBlock x:Name="PatchStatusText" Text="宿主状态覆盖：未检测" Opacity="0.7" />
+
+            <TextBlock Text="默认提前量（秒）" />
+            <TextBox x:Name="PrepSecondsBox" Width="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="下课延迟 D（秒，0-300）" />
+            <TextBox x:Name="ClassEndDelayBox" Width="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="预告提前量（秒，相对预备铃）" />
+            <TextBox x:Name="PreNoticeLeadBox" Width="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="预告溢出前一课间的处理" />
+            <ComboBox x:Name="OverflowCombo" Width="240" HorizontalAlignment="Left">
+                <ComboBoxItem Content="裁剪到课间中点" />
+                <ComboBoxItem Content="跳过预告" />
+                <ComboBoxItem Content="保持原时间" />
+            </ComboBox>
+
+            <TextBlock Text="启动补发窗口（秒）" />
+            <TextBox x:Name="MakeupWindowBox" Width="160" HorizontalAlignment="Left" />
+
+            <Separator />
+
+            <TextBlock Text="铃声（走宿主声音通道）" FontWeight="SemiBold" />
+            <CheckBox x:Name="EnableSoundCheck" Content="预备铃播放声音" />
+            <TextBlock Text="铃声文件路径" />
+            <TextBox x:Name="SoundPathBox" Width="420" HorizontalAlignment="Left" />
+            <TextBlock Text="音量（0-1）" />
+            <TextBox x:Name="VolumeBox" Width="160" HorizontalAlignment="Left" />
+            <Button x:Name="ButtonTestSound" Content="试听" Width="90" Click="ButtonTestSound_OnClick" />
+
+            <Separator />
+
+            <TextBlock Text="档案一键配置（先预览，确认后写入，可回滚）" FontWeight="SemiBold" />
+            <TextBlock Text="仅写入我方附加设置与宿主内置上课提醒开关，不触碰其他字段。"
+                       Opacity="0.7" TextWrapping="Wrap" />
+            <Button x:Name="ButtonPreview" Content="生成预览" Width="110" Click="ButtonPreview_OnClick" />
+            <ListBox x:Name="PreviewList" MaxHeight="220">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding SlotDisplay}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ButtonApply" Content="确认写入" Width="110" Click="ButtonApply_OnClick" />
+                <Button x:Name="ButtonRollback" Content="回滚" Width="90" Click="ButtonRollback_OnClick" />
+            </StackPanel>
+
+            <Button x:Name="ButtonSave" Content="保存设置" Width="110" Click="ButtonSave_OnClick" />
+            <TextBlock x:Name="StatusText" Text="" Opacity="0.8" TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</ci:SettingsPageBase>

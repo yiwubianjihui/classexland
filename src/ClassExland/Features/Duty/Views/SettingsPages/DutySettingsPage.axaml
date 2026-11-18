@@ -1,0 +1,257 @@
+<ci:SettingsPageBase x:Class="ClassExland.Features.Duty.Views.SettingsPages.DutySettingsPage"
+                     xmlns="https://github.com/avaloniaui"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                     xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                     xmlns:datagrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
+                     xmlns:local="clr-namespace:ClassExland.Features.Duty.Views.SettingsPages"
+                     xmlns:models="clr-namespace:ClassExland.Features.Duty.Models"
+                     xmlns:migration="clr-namespace:ClassExland.Features.Duty.Migration"
+                     mc:Ignorable="d"
+                     d:DesignHeight="900" d:DesignWidth="760">
+    <Grid DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:DutySettingsPage}}"
+          RowDefinitions="Auto,*" Margin="0,0,8,16">
+        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,12">
+            <TextBlock Text="值日表与提醒" FontSize="18" FontWeight="Bold"/>
+            <TextBlock TextWrapping="Wrap" Opacity="0.8"
+                       Text="所有数据仅保存在本机。表格内可直接编辑，修改自动保存；下课后延迟弹出值日提醒，特殊活动开始前提前提示并附带值日名单。"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="1">
+            <!-- Tab 1：值日表 -->
+            <TabItem Header="值日表">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="4,8,4,16">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="当前值日表" VerticalAlignment="Center"/>
+                            <ComboBox Width="220"
+                                      ItemsSource="{Binding Plans}"
+                                      SelectedItem="{Binding SelectedPlan}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Content="新增表" Click="ButtonAddPlan_OnClick"/>
+                            <Button Content="删除表" Click="ButtonRemovePlan_OnClick"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="+ 添加行" Click="ButtonAddItem_OnClick"/>
+                            <Button Content="删除选中行" Click="ButtonRemoveItem_OnClick"/>
+                            <Button Content="撤销" Click="ButtonUndo_OnClick"/>
+                            <Button Content="立即保存" Click="ButtonSave_OnClick"/>
+                        </StackPanel>
+
+                        <Border CornerRadius="6" Padding="8"
+                                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding RotationSummary}" FontWeight="Bold" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding PreviewText}" TextWrapping="Wrap" Opacity="0.75" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+
+                        <datagrid:DataGrid x:Name="ItemsGrid"
+                                           ItemsSource="{Binding Items}"
+                                           AutoGenerateColumns="False"
+                                           CanUserReorderColumns="False"
+                                           CanUserResizeColumns="True"
+                                           GridLinesVisibility="All"
+                                           HeadersVisibility="Column"
+                                           MinHeight="220"
+                                           CellEditEnded="ItemsGrid_OnCellEditEnded"
+                                           RowEditEnded="ItemsGrid_OnRowEditEnded">
+                            <datagrid:DataGrid.Columns>
+                                <datagrid:DataGridTextColumn Header="项目" Binding="{Binding Project}" Width="160"/>
+                                <datagrid:DataGridTextColumn Header="人员" Binding="{Binding Persons}" Width="*"/>
+                                <datagrid:DataGridTextColumn Header="时段" Binding="{Binding SlotLabel}" Width="90"/>
+                                <datagrid:DataGridTextColumn Header="星期" Binding="{Binding Weekday}" Width="60"/>
+                                <datagrid:DataGridTextColumn Header="颜色" Binding="{Binding Color}" Width="100"/>
+                                <datagrid:DataGridCheckBoxColumn Header="大扫除" Binding="{Binding IsSweep}" Width="70"/>
+                                <datagrid:DataGridCheckBoxColumn Header="提醒" Binding="{Binding RemindEnabled}" Width="60"/>
+                            </datagrid:DataGrid.Columns>
+                        </datagrid:DataGrid>
+
+                        <TextBlock Text="星期：-1=每天，0=周日，1=周一 … 6=周六；时段留空表示适用于全部时段。"
+                                   Opacity="0.7" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding ValidationHint}" Foreground="#E81123" TextWrapping="Wrap"
+                                   IsVisible="{Binding HasValidationHint}"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 2：时段与显示 -->
+            <TabItem Header="时段与显示">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="4,8,4,16">
+                        <TextBlock Text="时段（当前值日表）" FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="+ 添加时段" Click="ButtonAddSlot_OnClick"/>
+                            <Button Content="删除选中时段" Click="ButtonRemoveSlot_OnClick"/>
+                        </StackPanel>
+                        <datagrid:DataGrid x:Name="SlotsGrid"
+                                           ItemsSource="{Binding Slots}"
+                                           AutoGenerateColumns="False"
+                                           CanUserReorderColumns="False"
+                                           GridLinesVisibility="All"
+                                           HeadersVisibility="Column"
+                                           MinHeight="140"
+                                           CellEditEnded="ItemsGrid_OnCellEditEnded">
+                            <datagrid:DataGrid.Columns>
+                                <datagrid:DataGridTextColumn Header="标签" Binding="{Binding Label}" Width="120"/>
+                                <datagrid:DataGridTextColumn Header="开始" Binding="{Binding StartText}" Width="90"/>
+                                <datagrid:DataGridTextColumn Header="结束" Binding="{Binding EndText}" Width="90"/>
+                            </datagrid:DataGrid.Columns>
+                        </datagrid:DataGrid>
+
+                        <TextBlock Text="提醒与显示" FontWeight="Bold"/>
+                        <ToggleSwitch Content="启用下课值日提醒" IsChecked="{Binding Settings.EnableClassEndReminder}"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75"
+                                   Text="下课延迟由 BellModule 统一控制（默认 60 秒，含防拖堂）；值日提醒在下课事件到达时立即弹出，此处不再单独设置。"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="遮罩时长（秒）" VerticalAlignment="Center"/>
+                            <NumericUpDown Minimum="1" Maximum="60" Width="100" Value="{Binding Settings.MaskDurationSeconds}"/>
+                            <TextBlock Text="正文时长（秒）" VerticalAlignment="Center"/>
+                            <NumericUpDown Minimum="1" Maximum="120" Width="100" Value="{Binding Settings.OverlayDurationSeconds}"/>
+                        </StackPanel>
+                        <ToggleSwitch Content="人名朗读（走宿主语音通道，默认关）" IsChecked="{Binding Settings.EnableTtsSpeech}"/>
+                        <ToggleSwitch Content="组件显示时段徽标" IsChecked="{Binding Settings.ShowSlotBadge}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="提醒模板（{items} 替换名单）" VerticalAlignment="Center"/>
+                            <TextBox Width="340" Text="{Binding Settings.ReminderTemplate}"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="测试值日提醒" Click="ButtonTestDuty_OnClick"/>
+                            <Button Content="测试活动提醒" Click="ButtonTestActivity_OnClick"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 3：特殊活动 -->
+            <TabItem Header="特殊活动">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="4,8,4,16">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="活动" VerticalAlignment="Center"/>
+                            <ComboBox Width="220" ItemsSource="{Binding Activities}"
+                                      SelectedItem="{Binding SelectedActivity}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Content="添加试写作业预设" Click="ButtonAddPreset_OnClick"/>
+                        </StackPanel>
+                        <ToggleSwitch Content="启用活动前提前提示" IsChecked="{Binding ActivitySettings.EnableAdvanceNotice}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="提前分钟" VerticalAlignment="Center"/>
+                            <NumericUpDown Minimum="0" Maximum="120" Width="100"
+                                           Value="{Binding ActivitySettings.AdvanceMinutes}"/>
+                            <TextBlock Text="提醒时点（逗号分隔 HH:mm）" VerticalAlignment="Center"/>
+                            <TextBox Width="240" Text="{Binding SelectedActivity.ReminderTimesText}"/>
+                        </StackPanel>
+                        <ToggleSwitch Content="提醒附带当前值日名单" IsChecked="{Binding SelectedActivity.IncludeDutyNames}"/>
+                        <ToggleSwitch Content="仅工作日" IsChecked="{Binding SelectedActivity.SchoolDaysOnly}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="确认本周名单" Click="ButtonConfirmWeek_OnClick"/>
+                            <TextBlock Text="{Binding WeekStatus}" VerticalAlignment="Center" Opacity="0.75"/>
+                        </StackPanel>
+
+                        <TextBlock Text="名单组（按星期）" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding EffectiveGroupName}" FontWeight="Bold"/>
+                        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="64,*" RowSpacing="4">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="周一" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EffectiveGroup.Monday}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="周二" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding EffectiveGroup.Tuesday}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="周三" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding EffectiveGroup.Wednesday}"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="周四" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding EffectiveGroup.Thursday}"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="周五" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding EffectiveGroup.Friday}"/>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="周六" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding EffectiveGroup.Saturday}"/>
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="周日" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding EffectiveGroup.Sunday}"/>
+                        </Grid>
+                        <TextBlock Text="{Binding ActivityNamesText}" TextWrapping="Wrap" Opacity="0.75"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 4：导入导出 -->
+            <TabItem Header="导入导出">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="4,8,4,16">
+                        <TextBlock TextWrapping="Wrap" Opacity="0.8"
+                                   Text="从 DutyList / DutyRoster / 试写作业 / lrs2187.duty 的配置文件导入。只读旧文件，追加到现有配置；同名冲突会列出差异供你选择。"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="ImportPathBox" Width="420" Watermark="选择或粘贴旧插件配置文件路径"
+                                     Text="{Binding ImportPath}"/>
+                            <Button Content="选择文件" Click="ButtonPickImport_OnClick"/>
+                            <Button Content="预览" Click="ButtonPreviewImport_OnClick"/>
+                            <Button Content="应用导入" Click="ButtonApplyImport_OnClick"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding ImportResult}" TextWrapping="Wrap"/>
+                        <Border CornerRadius="6" Padding="8" IsVisible="{Binding HasConflicts}"
+                                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="同名冲突（请选择处理方式）" FontWeight="Bold"/>
+                                <ItemsControl ItemsSource="{Binding Conflicts}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type migration:MigrationConflict}">
+                                            <StackPanel Spacing="2" Margin="0,0,0,8">
+                                                <TextBlock Text="{Binding Title}" FontWeight="Bold"/>
+                                                <TextBlock Text="{Binding ExistingSummary}" TextWrapping="Wrap" Opacity="0.7"/>
+                                                <TextBlock Text="{Binding ImportedSummary}" TextWrapping="Wrap" Opacity="0.7"/>
+                                                <ComboBox Width="160" SelectedItem="{Binding Choice}">
+                                                    <ComboBox.Items>
+                                                        <migration:MigrationConflictChoice>Ask</migration:MigrationConflictChoice>
+                                                        <migration:MigrationConflictChoice>Keep</migration:MigrationConflictChoice>
+                                                        <migration:MigrationConflictChoice>Replace</migration:MigrationConflictChoice>
+                                                        <migration:MigrationConflictChoice>Skip</migration:MigrationConflictChoice>
+                                                    </ComboBox.Items>
+                                                </ComboBox>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="创意功能" FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="值日历史 CSV 导出" Click="ButtonExportCsv_OnClick"/>
+                            <Button Content="随机抽值日生" Click="ButtonLuckyDraw_OnClick"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding LuckyPickResult}" FontWeight="Bold"/>
+                        <ToggleSwitch Content="启用值日完成勾选" IsChecked="{Binding Settings.EnableChecklist}"/>
+                        <ToggleSwitch Content="节假日跳过（本地校历）" IsChecked="{Binding Settings.EnableHolidaySkip}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="本地抽签名单文件" VerticalAlignment="Center"/>
+                            <TextBox Width="340" Text="{Binding Settings.LuckyPickerNamesFile}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Tab 5：诊断 -->
+            <TabItem Header="诊断">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="4,8,4,16">
+                        <TextBlock Text="{Binding DiagnosticText}" TextWrapping="Wrap"/>
+                        <TextBlock Text="轮换日历预览（未来 21 天）" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding PreviewText}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</ci:SettingsPageBase>
