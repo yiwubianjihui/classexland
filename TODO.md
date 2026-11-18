@@ -17,8 +17,10 @@
 | 10 | 创意功能（排除 2 项） | ✅ | 各模块分摊 | 见各 `Features/` 目录 |
 | 11 | 项目文档 | ✅ | docs-dev | `docs/*.md`（6 篇）、`README.md`、`CONTRIBUTING.md` |
 | 12 | CI/CD 与发版 | ✅ | docs-dev | `.github/workflows/build.yml` |
-| 13 | 集成构建与验收 | 🔄 | team-lead | `docs/ACCEPTANCE.md`、`tests/ClassExland.Tests/` |
-| 14 | 推送到 `yiwubianjihui/classexland` | ⬜ | team-lead | 待 #13 通过后执行 |
+| 13 | 集成构建与验收 | ✅ | team-lead | `docs/ACCEPTANCE.md`、`tests/ClassExland.Tests/`（0 错 / 39 测试全绿） |
+| 14 | 推送到 `yiwubianjihui/classexland` | ✅ | team-lead | `main` 111 文件 / 13641 行，origin 已跟踪 |
+| 15 | 实机验收（装到 ClassIsland 2.1.0.1 跑 C 节清单） | ⬜ | — | `docs/ACCEPTANCE.md` C 节 |
+| 16 | 打 tag + Release 资产（cipx + SHA256SUMS） | ⬜ | — | `.github/workflows/build.yml` |
 
 ## 构建收敛记录（Release / net8.0）
 

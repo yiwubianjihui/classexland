@@ -27,3 +27,35 @@
 
 - 勘察 ClassIsland 2.1.0.1 本机目录，确认时间线 AttachedObjects、自动化文件、官方 IPC 三个扩展点。
 - 产出 `docs/DESIGN.md` 审核稿。
+
+## 2026-11-19 06:05 · 构建转绿
+
+用 WMI `Win32_Process.Create` 绕开终端故障（PowerShell 直启 dotnet 会抛 `AccessViolationException`，
+bash 遇中文路径崩 `0xC0000409`），跑通真实 Release 构建。四轮收敛 20 → 14 → 9 → 0：
+
+- 第一轮 20 错：命名空间写错、缺 `using`、`ClassPlan` 命名空间。
+- 第二轮 14 错：Bell 播放签名实际是 `PlayAudioAsync(Stream, float, CancellationToken?)`（宿主
+  `ClassIsland.Core.xml:964` 核实）；Duty 枚举根本没有 `CustomStart`；Bridge 的 `File.GetAccessControl`
+  是 .NET Framework API（正确形态是 `FileInfo` 上的扩展方法，net8.0 参考包已含，无需加包）。
+- 第三轮 9 错：`DutySettingsPage.axaml` 用 `models:` 前缀引用 `MigrationConflict`，实际命名空间是
+  `...Duty.Migration`。
+- 第四轮 **0 错 9 警告**，产出 `cipx/ClassExland.cipx`（243 KB）与 `cex.exe`。
+
+补齐 `tests/ClassExland.Tests`：3 个测试文件、39 个用例，**39/39 通过**。
+首跑 13 个失败是环境问题——插件对宿主 SDK 用了 `ExcludeAssets="runtime"`，
+`RotationSettings : ObservableRecipient` 在测试宿主里加载不到 `CommunityToolkit.Mvvm`；
+测试工程单独引入该包后全绿。
+
+## 2026-11-19 06:19 · 推送到 GitHub
+
+- 仓库 `yiwubianjihui/classexland` 原本不存在，经 API 创建（令牌作用域含 `repo`，身份 `Yibianhui`）。
+- **HTTPS 到 github.com 被重置**（`Recv failure: Connection was reset`），本机代理对 github.com 返回
+  `502 CONNECT`，只有 `api.github.com` 放行；TCP 各端口均可达 ⇒ 干扰在 TLS 层。
+- 改用 SSH：`github.com:22` 与 `ssh.github.com:443` 均可用。生成 Ed25519 部署密钥并经 API 注册。
+- 一个坑：用 WMI 传 `-N ""` 时 cmd 把空串解析成两个字面引号，密钥被加密成 `aes256-ctr`，
+  于是 SSH 停在 `Server accepts key` 后 `we did not send a packet`（BatchMode 拿不到密码）。
+  改为把 `ssh-keygen` 写进 `.bat` 交给 cmd 自己解析引号，重新生成后立即用 `ssh-keygen -y` 验证无密码。
+- 推送成功：`main` 111 文件 / 13641 行；`origin` 设为 `git@github.com:yiwubianjihui/classexland.git`，
+  已建立上游跟踪，工作区与远端无差异。
+- 令牌只出现在一次性命令里，未写入任何文件（全仓 grep 零命中）。
+

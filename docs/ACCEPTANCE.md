@@ -1,23 +1,42 @@
 # 验收清单（ClassExland 1.0.0.0）
 
-> 状态：待执行。当前会话的终端无法启动原生进程（dotnet/git 报 AccessViolationException），
-> 编译与 git 操作需在终端环境恢复后补做；代码审查与静态核对先行。
+> 状态：**A / B 已完成**（含真实的 Release 构建与 39 个单元测试），C 待装到 ClassIsland 实机验证。
+>
+> 环境说明：本机会话的 bash 工具对中文路径会崩（`0xC0000409`），PowerShell 直启原生进程会抛
+> `AccessViolationException`。构建与 git 操作改由 **WMI `Win32_Process.Create`** 发起，已跑通。
 
 ## A. 静态核对
 
-- [ ] 每个 Feature 目录都提供约定的注册扩展：`AddBell` / `AddDuty` / `AddLayout` / `AddRemoteSync` / `AddCommandBridge`。
-- [ ] `Plugin.cs` 调用了全部 5 个注册扩展，且只依赖 `Contracts` / `Infra`。
-- [ ] `manifest.yml` 的 `version` 与 `ClassExland.csproj` 的 `<Version>` 一致（1.0.0.0）。
-- [ ] 没有任何硬编码的服务器地址、令牌、密钥、真实学生名单。
-- [ ] 所有事件处理器有 try/catch；所有定时器订阅 `PostMainTimerTicked`。
-- [ ] 主界面组件单行、无显式 Height、无写死 FontSize。
+- [x] 每个 Feature 目录都提供约定的注册扩展：`AddBell` / `AddDuty` / `AddLayout` / `AddRemoteSync` / `AddCommandBridge`。
+- [x] `Plugin.cs` 调用了全部 5 个注册扩展，且只依赖 `Contracts` / `Infra`。
+- [x] `manifest.yml` 的 `version` 与 `ClassExland.csproj` 的 `<Version>` 一致（1.0.0.0）。
+- [x] 没有任何硬编码的服务器地址、令牌、密钥、真实学生名单（全仓 grep 过 `ghp_`、`http://` 常量、学生姓名）。
+- [x] 所有事件处理器有 try/catch；所有定时器订阅 `PostMainTimerTicked`。
+- [x] 主界面组件单行、无显式 Height、无写死 FontSize。
+- [x] `IAppHost` 服务获取统一走 `TryGetService<T>()`（已对官方源码核实：C# 8 静态接口成员）。
 
 ## B. 构建
 
-- [ ] `dotnet restore ClassExland.sln` 成功。
-- [ ] `dotnet build -c Release` 成功（允许 AVLN3001 无害警告）。
-- [ ] `dotnet test` 通过：`BellTimelineCalculator`、`RotationCalculator`、迁移器纯逻辑测试。
-- [ ] `cipx/ClassExland.cipx` 生成，包内 `manifest.yml` 版本一致。
+- [x] `dotnet restore ClassExland.sln` 成功。
+- [x] `dotnet build -c Release` 成功：**0 错误 / 9 警告**（警告为 CS1998 空异步、CS0618 过时对话框、
+      CS8604 可空实参，均不影响功能）。
+- [x] `dotnet test` 通过：**39/39**，覆盖 `BellTimelineCalculator`（14）、`RotationCalculator`（15）、
+      `DutyPersonParser`（10）。
+- [x] `cipx/ClassExland.cipx` 生成（243 KB），包内清单为 `manifest.yml` + `ClassExland.dll` + `icon.png`
+      + `README.md` + `deps/runtimeconfig`，版本与 csproj 一致。
+
+### 构建收敛过程（Release 实测，非静态推测）
+
+| 轮次 | 错误数 | 根因 | 处置 |
+|---|---|---|---|
+| 1 | 20 | `ClassExland.Shared.Helpers` 命名空间写错、3 个模型缺 `using System.Collections.ObjectModel`、`ClassPlan` 缺 `ClassIsland.Shared.Models.Profile` | 各模块自修 |
+| 2 | 14 | Bell 播放签名传 string（实际为 `PlayAudioAsync(Stream, float, CancellationToken?)`）；Duty 枚举无 `CustomStart`、局部变量 `start` 撞名；Bridge 4 类（`BridgeEndpoint.Token` 不存在、`CreateEntryFromFile` 缺 using、`File.GetAccessControl` 是 .NET Framework API、async 方法里误用 `Task.FromResult`） | 按宿主 XML 文档与 net8.0 参考包逐一核实后修 |
+| 3 | 9 | `DutySettingsPage.axaml` 用 `models:` 前缀引用 `MigrationConflict` / `MigrationConflictChoice`，但二者实际在 `...Duty.Migration` | 增加 `xmlns:migration` 前缀 |
+| 4 | 0 | — | 构建成功 |
+
+> 单测首跑 13 个失败，原因是插件工程对宿主 SDK 用了 `ExcludeAssets="runtime"`，
+> 运行时资产不进测试输出目录，`RotationSettings : ObservableRecipient` 无法实例化。
+> 测试工程单独引入 `CommunityToolkit.Mvvm` 后 39/39 全绿。
 
 ## C. 运行时（安装到 ClassIsland 2.1.0.1）
 
@@ -33,5 +52,6 @@
 
 ## D. 发版
 
+- [x] 初始提交已推送到 `yiwubianjihui/classexland`（`main`），111 个文件。
 - [ ] `git tag v1.0.0.0` 推送后 CI 产出 `.cipx` 与 `SHA256SUMS`。
 - [ ] Release 页面可见资产，README 安装步骤可用。
