@@ -156,6 +156,15 @@ public partial class DutySettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public bool HasConflicts => _conflicts.Count > 0;
 
+    /// <summary>迁移冲突下拉框选项：枚举值 + 中文标签，避免设置页出现英文枚举。</summary>
+    public IReadOnlyList<ConflictChoiceOption> ConflictChoices { get; } = new[]
+    {
+        new ConflictChoiceOption(MigrationConflictChoice.Ask, "待决定"),
+        new ConflictChoiceOption(MigrationConflictChoice.Keep, "保留现有"),
+        new ConflictChoiceOption(MigrationConflictChoice.Replace, "用导入的替换"),
+        new ConflictChoiceOption(MigrationConflictChoice.Skip, "跳过这条")
+    };
+
     // ---- 值日表编辑 ----
 
     private void ButtonAddPlan_OnClick(object? sender, RoutedEventArgs e)
@@ -538,3 +547,6 @@ public partial class DutySettingsPage : SettingsPageBase, INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
+
+/// <summary>迁移冲突下拉框的选项（枚举值 + 中文标签）。</summary>
+public sealed record ConflictChoiceOption(MigrationConflictChoice Value, string Label);

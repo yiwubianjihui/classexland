@@ -211,13 +211,14 @@
                                                 <TextBlock Text="{Binding Title}" FontWeight="Bold"/>
                                                 <TextBlock Text="{Binding ExistingSummary}" TextWrapping="Wrap" Opacity="0.7"/>
                                                 <TextBlock Text="{Binding ImportedSummary}" TextWrapping="Wrap" Opacity="0.7"/>
-                                                <ComboBox Width="160" SelectedItem="{Binding Choice}">
-                                                    <ComboBox.Items>
-                                                        <migration:MigrationConflictChoice>Ask</migration:MigrationConflictChoice>
-                                                        <migration:MigrationConflictChoice>Keep</migration:MigrationConflictChoice>
-                                                        <migration:MigrationConflictChoice>Replace</migration:MigrationConflictChoice>
-                                                        <migration:MigrationConflictChoice>Skip</migration:MigrationConflictChoice>
-                                                    </ComboBox.Items>
+                                                <ComboBox Width="160" SelectedValue="{Binding Choice}"
+                                                          SelectedValueBinding="{Binding Value}"
+                                                          ItemsSource="{Binding $parent[local:DutySettingsPage].ConflictChoices}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding Label}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
                                                 </ComboBox>
                                             </StackPanel>
                                         </DataTemplate>
