@@ -59,3 +59,31 @@ bash 遇中文路径崩 `0xC0000409`），跑通真实 Release 构建。四轮�
   已建立上游跟踪，工作区与远端无差异。
 - 令牌只出现在一次性命令里，未写入任何文件（全仓 grep 零命中）。
 
+## 2026-11-19 12:2x · 发版 v1.0.0.0
+
+发现：之前三次 `main` 的 CI 构建**全部失败**，但我只验证了本地构建没查 Actions。逐步骤看下来，
+失败点是第 7 步「校验包内 manifest.yml 与 csproj 版本一致」，而版本其实已校验通过
+（日志里 `csproj=1.0.0.0  manifest=1.0.0.0` 正常打印）。真正原因是下一行
+`print("版本校验通过")`——Windows runner 的 Python stdout 默认 cp1252，中文抛
+`UnicodeEncodeError`，进程以 exit 1 结束。报错分支里的中文 `sys.exit(...)` 同理。
+
+修复：该步骤加 `env: PYTHONIOENCODING: utf-8`，脚本内另做
+`sys.stdout.reconfigure(encoding="utf-8")` / `sys.stderr.reconfigure(...)` 双保险，并注释说明原因。
+提交 `0e07360` 后 main 构建 run `44457956381` 全绿。
+
+发版：`v1.0.0.0` 先指向 `fa4540d`（会重蹈覆辙），已删除远端 tag 重建到 `0e07360`。
+tag 构建 run `44458193363` 11 步全绿，Release 自动发布。
+
+验收：
+- Release `v1.0.0.0` 非草稿非预发布，匿名 API 可读，资产 `ClassExland.cipx` 238 472 B + `SHA256SUMS` 83 B。
+- 下载两个资产实测 SHA256 = `e9eb77d4…9891`，与 `SHA256SUMS` 一致。
+- 解包检查：`manifest.yml`（version 1.0.0.0）、`ClassExland.dll`、`ClassExland.pdb`、
+  `deps.json`、`runtimeconfig.json`、`icon.png`、`README.md`。
+- Release 正文原本只有一行 `Full Changelog`，已 PATCH 成完整中文说明（功能、安装、文件与校验和、
+  兼容性、文档链接）。踩到一个 PS 5.1 坑：`Get-Content -Raw` 的返回值被包成 `{value, ReadCount}`
+  对象，`ConvertTo-Json` 后膨胀到 450 KB 并 422，改用 `[System.IO.File]::ReadAllText` 解决。
+
+顺带修正 README 里 cipx 输出目录的错误说明（实际是 `src/ClassExland/cipx/`，
+由 SDK targets 的 `CipxPackageOutputDirectory` 决定，不是 `bin/Release/net8.0/`）。
+
+

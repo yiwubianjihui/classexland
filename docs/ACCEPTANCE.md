@@ -1,6 +1,6 @@
 # 验收清单（ClassExland 1.0.0.0）
 
-> 状态：**A / B 已完成**（含真实的 Release 构建与 39 个单元测试），C 待装到 ClassIsland 实机验证。
+> 状态：**A / B / D 已完成**（含真实的 Release 构建、39 个单元测试、CI 发版流水线与线上 Release 校验），C 待装到 ClassIsland 实机验证。
 >
 > 环境说明：本机会话的 bash 工具对中文路径会崩（`0xC0000409`），PowerShell 直启原生进程会抛
 > `AccessViolationException`。构建与 git 操作改由 **WMI `Win32_Process.Create`** 发起，已跑通。
@@ -53,5 +53,21 @@
 ## D. 发版
 
 - [x] 初始提交已推送到 `yiwubianjihui/classexland`（`main`），111 个文件。
-- [ ] `git tag v1.0.0.0` 推送后 CI 产出 `.cipx` 与 `SHA256SUMS`。
-- [ ] Release 页面可见资产，README 安装步骤可用。
+- [x] `git tag v1.0.0.0`（annotated，指向 `0e07360`）推送后 CI 产出 `.cipx` 与 `SHA256SUMS`。
+- [x] Release 页面可见资产，README 安装步骤可用。
+
+### 发版实测记录
+
+| 项 | 结果 |
+|---|---|
+| CI 流水线 | run `44458193363` 全 11 步 success（含版本一致性校验、SHA256SUMS 生成、Release 发布） |
+| Release | `v1.0.0.0`，名称「ClassExland v1.0.0.0 · 首个公开版本」，非草稿、非预发布，匿名可访问 |
+| 资产 | `ClassExland.cipx` 238 472 B、`SHA256SUMS` 83 B |
+| 校验和 | `e9eb77d4184daf0750993bc3beb9e8ab77a70eaab198f6d2b400f58a73919891`，下载后本地实测一致 |
+| 包内容 | `manifest.yml`（version 1.0.0.0）、`ClassExland.dll`、`ClassExland.pdb`、`deps/runtimeconfig.json`、`icon.png`、`README.md` |
+
+> CI 前三次 `main` 构建均失败，但**不是代码问题**：第 7 步「校验版本一致性」里 Python 在 Windows
+> runner 上用 cp1252 输出，`print("版本校验通过")` 的中文抛 `UnicodeEncodeError`，而版本其实已校验通过
+> （日志中 `csproj=1.0.0.0 manifest=1.0.0.0` 已正常打印）。修复为步骤级 `PYTHONIOENCODING=utf-8`
+> 加脚本内 `sys.stdout.reconfigure(encoding="utf-8")` 双保险，`0e07360` 之后 main 与 tag 两次构建均全绿。
+

@@ -20,7 +20,7 @@
 | 13 | 集成构建与验收 | ✅ | team-lead | `docs/ACCEPTANCE.md`、`tests/ClassExland.Tests/`（0 错 / 39 测试全绿） |
 | 14 | 推送到 `yiwubianjihui/classexland` | ✅ | team-lead | `main` 111 文件 / 13641 行，origin 已跟踪 |
 | 15 | 实机验收（装到 ClassIsland 2.1.0.1 跑 C 节清单） | ⬜ | — | `docs/ACCEPTANCE.md` C 节 |
-| 16 | 打 tag + Release 资产（cipx + SHA256SUMS） | ⬜ | — | `.github/workflows/build.yml` |
+| 16 | 打 tag + Release 资产（cipx + SHA256SUMS） | ✅ | team-lead | `v1.0.0.0` → run `44458193363`，资产已发布并核验 SHA256 |
 
 ## 构建收敛记录（Release / net8.0）
 
@@ -28,7 +28,11 @@
 |---|---|---|---|
 | 第 1 轮 | 20 | 命名空间写错（`ClassExland.Shared.Helpers`）、缺 `using`、`ClassPlan` 命名空间 | bell-dev / duty-dev 已修 |
 | 第 2 轮 | 14 | Bell 播放签名、Duty 枚举与变量撞名、Bridge 4 类 | 分派 bell/duty/cli/sys |
-| 第 3 轮 | 待测 | — | 已补齐 `tests/ClassExland.Tests`（3 个测试文件） |
+| 第 3 轮 | 9 | `DutySettingsPage.axaml` 的 `models:` 前缀指向错命名空间 | team-lead 改为 `migration:` |
+| 第 4 轮 | 0 | — | 构建成功（9 警告） |
+
+> CI 侧另有一处**非代码**失败：版本校验步骤的中文 `print` 在 Windows runner 上触发
+> `UnicodeEncodeError`（cp1252），已由 `PYTHONIOENCODING=utf-8` + `sys.stdout.reconfigure` 修复。
 
 ## 已知环境限制
 
