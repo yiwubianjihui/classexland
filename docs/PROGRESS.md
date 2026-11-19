@@ -157,3 +157,38 @@ DataGrid 的运行时主题（`avares://Avalonia.Controls.DataGrid/Themes/...`�
 勾选框与输入框仍双向绑定到 `BellSlotRow`，`应用每节课设置` 的语义不变（TextBox 默认按 PropertyChanged 回写，
 所以不再需要 `CommitEdit`）。值班表页仍保留原有 DataGrid（宿主自身的主界面就用 DataGrid 渲染课表，
 说明主题由宿主提供；若实测有问题再一起换）。
+
+## 2026-11-20 凌晨 · 档案编辑器内嵌预备铃（1.0.0.3）
+
+用户问「预备铃不能直接在时间表档案编辑里设置么」——能，而且本来就该这么做。
+
+排查结论：ClassIsland 有一套「附加设置」机制（`AttachedSettingsTargets.TimePoint` 对应
+`TimeLayoutItem`），插件注册一个 `AttachedSettingsControlBase<T>` 子类后，档案编辑器里
+选中某个时间点就会在「附加设置」中渲染该控件。我们从 1.0.0.0 起只往
+`AttachedObjects[我方GUID]` 写数据，但**从未注册控件**，所以用户在课表里看不到任何入口。
+
+实现：
+
+- `BellSlotSettings` 实现 `IAttachedSettings`（宿主靠 `IsAttachSettingsEnabled` 决定是否把对象
+  写回档案；不实现的话控件里改的值根本存不下来）。默认 `true`，兼容旧档案。
+- 新增 `BellSlotSettingsControl`：`[AttachedSettingsUsage(TimePoint)]` +
+  `[AttachedSettingsControlInfo(我方GUID, "预备铃（ClassExland）", …)]`，纯 C# 建 UI
+  （PluginSdk 2.0.0.2 的基类没有 `AttachedTimePointTimeType`，无法区分上课/课间，统一提示）。
+  在 `OnAttachedToVisualTree` 读取 `Settings`——宿主是先构造控件再注入设置对象。
+- `BellRegistration` 增加 `services.AddAttachedSettingsControl<BellSlotSettingsControl>()`。
+- 时间轴变更签名纳入每节课提前量：原来只含课表名/布局 ID，在档案里改值不会触发重建。
+- 重建时若已过启动阶段，调用 `SeedStateFromHistory` 重新推导状态；否则 `_fired.Clear()` 后
+  `FireDue` 会把当天已过去的时点全部补发一遍（历史上的"重放一上午铃声"会复现）。
+- 设置页取消勾选「单独设置」改为真正删除档案里的附加对象（原来写成默认值，表里显示未勾选、
+  档案里却留着固定值）。
+
+验证：构建 0 错误；单测 42/42（新增 3 个档案格式兼容测试，固定住 `prepSeconds` 小写 +
+`IsAttachSettingsEnabled` 的线上形状）。测试工程新增 `ClassIsland.Shared` 与
+`System.Text.Json 9.0.2` 引用——前者因为 `BellSlotSettings` 实现了宿主接口，后者因为
+Shared 2.0.0.2 的元数据引用 STJ 9.0.0.0 而测试宿主是 .NET 8。
+
+部署：宿主已退出，`ClassExland.dll` / `.pdb` / `manifest.yml` 覆盖到实机，
+MD5 `474B9F2B1571F2E8508235E981D57782` 与构建产物一致；旧版备份 `artifacts/backup-1.0.0.2/`。
+`cex` 同步更新到 1.0.0.3。
+
+未完成：本机安全策略仍拦截 WMI 启动宿主，档案编辑器内的实际渲染要用户打开确认。
