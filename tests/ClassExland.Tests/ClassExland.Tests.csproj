@@ -18,6 +18,17 @@
       因此在测试工程里单独引入（仅测试需要，不影响 cipx 打包）。
     -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
+    <!--
+      BellSlotSettings 实现了宿主的 IAttachedSettings，测试加载该类型时需要这个程序集；
+      插件工程把 SDK 的 runtime 资产排除了，不会自动复制到测试输出目录。
+    -->
+    <PackageReference Include="ClassIsland.Shared" Version="2.0.0.2" />
+    <!--
+      ClassIsland.Shared 2.0.0.2 的元数据引用了 System.Text.Json 9.0.0.0，
+      而测试宿主是 .NET 8，框架自带的 8.x 版本号对不上。补上 9.x 让它复制到输出目录；
+      宿主 ClassIsland 自己也带了这个 DLL，插件运行时不依赖这条。
+    -->
+    <PackageReference Include="System.Text.Json" Version="9.0.2" />
   </ItemGroup>
 
   <ItemGroup>

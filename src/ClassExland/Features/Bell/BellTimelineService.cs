@@ -178,6 +178,10 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
         if (_scheduleDate == now.Date && signature == _scheduleSignature && layout != null)
             return;
 
+        // 已经过完启动阶段的"热重载"：重建后必须重新推导状态，
+        // 否则 FireDue 会把当天所有已过去的时点当作未触发逐个补发（等于重放一上午的铃声）。
+        var wasRunning = _initialized;
+
         _scheduleDate = now.Date;
         _scheduleSignature = signature;
         _fired.Clear();
@@ -198,7 +202,10 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
 
             var key = BellProfileWriter.MakeSlotKey(layoutId, item);
             var attached = item.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid);
-            var prep = attached?.PrepSeconds ?? _settings.GetPrep(key);
+            // 档案编辑器里可以关掉这项附加设置，关掉就当作没配置，回退到 bell.json / 默认值。
+            var prep = attached is { IsAttachSettingsEnabled: true }
+                ? attached.PrepSeconds
+                : _settings.GetPrep(key);
 
             slots.Add(new BellSlot(
                 key,
@@ -215,6 +222,9 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             .Max();
 
         _moments = BellTimelineCalculator.Build(slots, _settings.ToOptions(), now);
+
+        if (wasRunning) SeedStateFromHistory(now);
+
         _logger.LogInformation("已重建今日预备铃时间轴，共 {Count} 个事件。", _moments.Count);
     }
 
@@ -224,7 +234,20 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
         var changed = string.Join(",", plan.Classes.Select(c => c.IsChangedClass ? "1" : "0"));
         // 临时调课会写入 ClassPlan.AttachedObjects；把这些键纳入签名，一旦变化立即重算。
         var attachedKeys = string.Join(",", plan.AttachedObjects.Keys.OrderBy(k => k).Select(k => k.ToString("D")));
-        return $"{plan.Name}|{plan.TimeLayoutId}|{plan.IsOverlay}|{plan.OverlaySourceId}|{changed}|{attachedKeys}";
+
+        // 每节课的提前量也要进签名：用户在档案编辑器里直接改附加设置时，
+        // 课表本身的 Name/TimeLayoutId 都不变，只有这里的值会变。
+        // 不纳入的话要重启宿主才会按新值响铃。
+        var layouts = plan.TimeLayout?.Layouts;
+        var preps = layouts is null
+            ? ""
+            : string.Join(",", layouts
+                .Where(i => i.TimeType is 0 or 1)
+                .Select(i => i.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid) is { IsAttachSettingsEnabled: true } s
+                    ? s.PrepSeconds.ToString()
+                    : "-"));
+
+        return $"{plan.Name}|{plan.TimeLayoutId}|{plan.IsOverlay}|{plan.OverlaySourceId}|{changed}|{attachedKeys}|{preps}";
     }
 
     private void FireMakeup(DateTimeOffset now)

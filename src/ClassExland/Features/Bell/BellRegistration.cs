@@ -26,6 +26,10 @@ public static class BellRegistration
         services.AddSingleton<HarmonyPatcher>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<HarmonyPatcher>());
 
+        // 让「档案编辑 → 时间点 → 附加设置」里直接出现预备铃提前量输入框。
+        // 不注册的话只能往档案里写数据，用户在课表里看不到也改不了。
+        services.AddAttachedSettingsControl<BellSlotSettingsControl>();
+
         // AddNotificationProvider<T> 只登记为 IHostedService，不注册 T 本身。
         services.AddNotificationProvider<BellNotificationProvider>();
         services.AddSettingsPage<BellSettingsPage>();

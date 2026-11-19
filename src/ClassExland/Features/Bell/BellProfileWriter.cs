@@ -46,7 +46,9 @@ public sealed class BellProfileWriter
 
                     var key = MakeSlotKey(layoutKvp.Key, slot);
                     var our = slot.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid);
-                    var oldPrep = our?.PrepSeconds ?? GetFallbackPrep(key);
+                    var oldPrep = our is { IsAttachSettingsEnabled: true }
+                        ? our.PrepSeconds
+                        : GetFallbackPrep(key);
                     var newPrep = GetFallbackPrep(key);
 
                     var willDisable = false;
@@ -80,9 +82,15 @@ public sealed class BellProfileWriter
     /// 只把每节课的提前量写进档案（我方附加设置），不改宿主自带的提醒开关。
     /// 设置页"应用每节课设置"与 CLI bell set 走这条路径。
     /// </summary>
-    public bool ApplySlotPreps() => ApplyCore(disableHostNotifications: false, rebuildPreview: true);
+    /// <param name="removeSlotKeys">
+    /// 需要"恢复默认"的节次：把这些节的附加设置从档案里删掉，而不是写成默认值。
+    /// 设置页里取消勾选「单独设置」走这条路径；为 null 时保持原样（CLI 只改一节时用）。
+    /// </param>
+    public bool ApplySlotPreps(IReadOnlyCollection<string>? removeSlotKeys = null)
+        => ApplyCore(disableHostNotifications: false, rebuildPreview: true, removeSlotKeys);
 
-    private bool ApplyCore(bool disableHostNotifications, bool rebuildPreview = false)
+    private bool ApplyCore(bool disableHostNotifications, bool rebuildPreview = false,
+        IReadOnlyCollection<string>? removeSlotKeys = null)
     {
         if (rebuildPreview || _lastPreview.Count == 0) BuildPreview();
         _lastRollback.Clear();
@@ -101,6 +109,21 @@ public sealed class BellProfileWriter
 
                 var hadOur = slot.AttachedObjects.TryGetValue(BellConstants.SlotAttachedGuid, out var ourOld);
                 var hadHost = slot.AttachedObjects.TryGetValue(BellConstants.HostNotificationAttachedGuid, out var hostOld);
+
+                // 取消勾选 = 恢复默认：直接删掉附加设置，不能写成默认值——
+                // 否则表里看着是"未勾选"，档案里却留着一个固定值，以后改默认值它不会跟着变。
+                if (removeSlotKeys is not null && removeSlotKeys.Contains(change.SlotKey))
+                {
+                    if (!hadOur) continue;
+
+                    _lastRollback.Add(new BellProfileRollbackEntry(
+                        change.TimeLayoutId, change.SlotKey, hadOur, ourOld, hadHost, hostOld,
+                        change.OldPrepSeconds, _settings.HasPrepOverride(change.SlotKey)));
+
+                    slot.AttachedObjects.Remove(BellConstants.SlotAttachedGuid);
+                    _settings.RemovePrep(change.SlotKey);
+                    continue;
+                }
 
                 // 值没变、又不需要处理宿主提醒时跳过，避免把整份档案都写上我方附加设置。
                 var needWrite = !(hadOur && ourOld is BellSlotSettings oldValue &&

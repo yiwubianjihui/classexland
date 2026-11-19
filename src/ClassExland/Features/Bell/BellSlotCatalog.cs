@@ -42,8 +42,10 @@ public static class BellSlotCatalog
                 inLayout++;
                 var key = BellProfileWriter.MakeSlotKey(layoutId, item);
                 var attached = item.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid);
-                var overridden = attached != null || settings.HasPrepOverride(key);
-                var effective = attached?.PrepSeconds ?? settings.GetPrep(key);
+                // 宿主在附加设置上提供了启用开关，关掉等同于"未设置"，要退回 bell.json / 默认值。
+                var active = attached is { IsAttachSettingsEnabled: true };
+                var overridden = active || settings.HasPrepOverride(key);
+                var effective = active ? attached!.PrepSeconds : settings.GetPrep(key);
                 var name = string.IsNullOrWhiteSpace(layout.Name) ? "时间表" : layout.Name;
                 var time = $"{item.StartTime:hh\\:mm}-{item.EndTime:hh\\:mm}";
 

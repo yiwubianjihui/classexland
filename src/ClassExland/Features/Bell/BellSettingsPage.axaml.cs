@@ -138,11 +138,13 @@ public partial class BellSettingsPage : SettingsPageBase
 
             var preps = new Dictionary<string, int?>();
             var labels = new Dictionary<string, string?>();
+            var removeKeys = new List<string>();
             foreach (var row in _slotRows)
             {
                 if (!row.UseOverride)
                 {
                     preps[row.SlotKey] = null;
+                    removeKeys.Add(row.SlotKey);
                     continue;
                 }
 
@@ -158,7 +160,7 @@ public partial class BellSettingsPage : SettingsPageBase
             }
 
             _settings.ApplyPreps(preps, labels);
-            var ok = _writer.ApplySlotPreps();
+            var ok = _writer.ApplySlotPreps(removeKeys);
             _timeline.InvalidateSchedule();
             LoadSlotRows();
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClassExland.Contracts;
+using ClassIsland.Shared.Interfaces;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ClassExland.Features.Bell;
@@ -45,11 +46,19 @@ public sealed class BellSlotConfig
 /// <summary>
 /// 写入 <c>TimeLayoutItem.AttachedObjects[我方GUID]</c> 的附加设置。
 /// 只有这一个字段属于我们，绝不触碰宿主或其他插件的附加设置。
+/// 实现 <see cref="IAttachedSettings"/> 后，宿主档案编辑器的「附加设置」区域
+/// 才能通过 <see cref="BellSlotSettingsControl"/> 直接读写它。
 /// </summary>
-public sealed class BellSlotSettings
+public sealed class BellSlotSettings : IAttachedSettings
 {
     [JsonPropertyName("prepSeconds")]
     public int PrepSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// 宿主的附加设置启用开关。关闭时本项不参与计算（回退到 bell.json 或默认值），
+    /// 宿主也不会把它写回档案。
+    /// </summary>
+    public bool IsAttachSettingsEnabled { get; set; } = true;
 }
 
 /// <summary>
