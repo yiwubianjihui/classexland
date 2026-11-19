@@ -264,3 +264,21 @@ sha256 `8052142d…f567bb`）与 `SHA256SUMS`。
 > 访问标志 `mdPublic=True`，属性类型是 `int`。所以 `GetType().GetProperty("AttachedTimePointTimeType")`
 > 一定能拿到，不需要 `NonPublic` 兜底（试过一版，为保持源码与已发布二进制一致又回退了）。
 > 探针脚本留在 `artifacts/probe_attached_type.py`，以后核宿主 API 可直接复用。
+
+## 2026-11-20 01:00 · 1.0.0.5（课间识别的时序问题）
+
+1.0.0.4 用反射读 `AttachedTimePointTimeType` 判断上课/课间，但只读了两个时点：
+构造时和 `OnAttachedToVisualTree`。核宿主元数据时发现还有
+`AttachedSettingsControlPresenter.UpdateContentAttachedTimePointTimeType`（private），
+说明这个值是由 presenter **推**给控件的——推送时机若晚于挂树，控件读到的就是默认值 0，
+课间仍会显示可编辑的输入框（用户提的正是这个问题）。
+
+修法：重写 `OnPropertyChanged`，属性名等于 `AttachedTimePointTimeType` 时重算一次
+（`Refresh()` 同时负责禁用输入、写 `IsAttachSettingsEnabled=false`、换说明文字）。
+这是纯增量，属性早到或晚到都能收敛到正确状态。
+
+顺带把核验宿主 API 的手法固化成 `tools/probe_host_metadata.py`（dnfile 纯字节解析，
+不加载程序集），以后遇到"编译期没有、运行期可能有"的成员直接查一行。
+
+构建 0 错误、单测 42/42、`ClassExland.cipx` 285113 B；实机 DLL 已换成 1.0.0.5
+（旧 1.0.0.4 留在 `artifacts/backup-1.0.0.4.dll`），`cex` 同步重新发布。

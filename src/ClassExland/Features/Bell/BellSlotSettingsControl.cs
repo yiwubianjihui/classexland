@@ -81,6 +81,18 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
         Refresh();
     }
 
+    /// <summary>
+    /// 宿主是通过 <c>AttachedSettingsControlPresenter</c> 给控件推 <c>AttachedTimePointTimeType</c> 的，
+    /// 推送时机可能晚于构造与挂树。跟着属性变化重算一次，避免读到默认值 0 而把课间当成上课。
+    /// 这个属性编译期不存在（PluginSdk 2.0.0.2 没有），只能按名字比对。
+    /// </summary>
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property?.Name == "AttachedTimePointTimeType")
+            Refresh();
+    }
+
     /// <summary>把设置对象的值拉进输入框。</summary>
     private void Refresh()
     {

@@ -4,6 +4,17 @@
 
 ## [未发布]
 
+## [1.0.0.5] - 2026-11-20
+
+### 修复
+
+- **课间识别可能读不到时间点类型**：宿主的 `AttachedTimePointTimeType` 是由
+  `AttachedSettingsControlPresenter` 推给控件的，推送时机可能晚于控件构造与挂到可视化树，
+  于是课间的附加设置仍按"上课"渲染、输入框可编辑。现在控件跟随该属性变化重算一次，
+  课间/放学等非上课时段会稳定禁用输入框。
+  （已用 `dnfile` 解析宿主元数据确认：该属性是 `AttachedSettingsControlBase` 上的 public 属性，
+  类型 `int`，0 = 上课、1 = 课间；探针脚本见 `tools/probe_host_metadata.py`。）
+
 ## [1.0.0.4] - 2026-11-20
 
 ### 新增
