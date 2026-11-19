@@ -291,21 +291,192 @@ public sealed class LoopbackWebHost : BackgroundService
     }
 
     private string BuildPage() => """
-        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+        <!doctype html>
+        <html lang="zh-CN"><head>
+        <meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>ClassExland 管理页</title>
-        <style>body{font-family:system-ui;margin:2rem;max-width:780px}pre{background:#f5f5f5;padding:1rem;overflow:auto;border-radius:6px}
-        button{padding:.5rem 1rem;margin:.25rem}code{color:#256}</style></head><body>
-        <h1>ClassExland 管理页</h1><p>仅本机可访问，令牌已包含在地址中。请勿分享完整 URL。</p>
-        <div><button onclick="load('/api/status')">当前状态</button><button onclick="load('/api/duty')">当前值日</button><button onclick="load('/api/profiles')">档案列表</button></div>
-        <div><button onclick="post('/api/sync',{})">立即同步</button><button onclick="switchProfile()">切换档案</button></div>
-        <h3>结果</h3><pre id="out">点击上方按钮查看</pre>
+        <title>ClassExland 控制台</title>
+        <style>
+          :root{color-scheme:light dark;--bg:#f5f6f8;--card:#fff;--fg:#1b1f24;--muted:#6a737d;--line:#e3e6ea;--accent:#2f6fed;--ok:#1a7f37;--danger:#c0392b}
+          @media (prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1c2024;--fg:#e9edf2;--muted:#98a2ad;--line:#2a3036;--accent:#6b9dff;--ok:#4ac26b;--danger:#ff7b72}}
+          *{box-sizing:border-box}
+          body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,"Segoe UI","Microsoft YaHei",sans-serif}
+          .wrap{max-width:760px;margin:0 auto;padding:26px 18px 56px}
+          header{display:flex;align-items:baseline;gap:10px;margin-bottom:16px}
+          header h1{font-size:18px;margin:0}
+          .tag{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 9px}
+          .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:13px}
+          .state{font-size:30px;font-weight:700;line-height:1.2}
+          .state[data-s="OnClass"]{color:var(--accent)}
+          .state[data-s="Breaking"]{color:var(--ok)}
+          .state[data-s="AfterSchool"],.state[data-s="None"]{color:var(--muted)}
+          .sub{color:var(--muted);font-size:14px}
+          .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:13px}
+          @media (max-width:520px){.grid{grid-template-columns:1fr}}
+          button{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+          button:hover{border-color:var(--accent)}
+          button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+          button:disabled{opacity:.5;cursor:default}
+          h2{font-size:14px;margin:0 0 10px;color:var(--muted);font-weight:600}
+          .duty-item{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px dashed var(--line)}
+          .duty-item:first-of-type{border-top:0}
+          .duty-proj{color:var(--muted)}
+          .duty-names{font-weight:600;text-align:right}
+          .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+          select{font:inherit;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--fg);min-width:190px}
+          .hint{color:var(--muted);font-size:12px}
+          details{margin-top:14px}
+          summary{cursor:pointer}
+          pre{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;font-size:12px}
+          #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:99px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;max-width:90vw}
+          #toast.show{opacity:.92}
+        </style></head>
+        <body><div class="wrap">
+          <header><h1>ClassExland 控制台</h1><span class="tag">仅本机可访问</span></header>
+
+          <section class="card">
+            <div class="state" id="state" data-s="">读取中…</div>
+            <div class="sub" id="next">—</div>
+            <div class="sub" id="meta">—</div>
+          </section>
+
+          <div class="grid">
+            <button onclick="switchLayout('class')">切到上课布局</button>
+            <button onclick="switchLayout('break')">切到下课布局</button>
+            <button onclick="refresh()">刷新状态</button>
+            <button onclick="loadDuty()">查看值日表</button>
+            <button onclick="loadProfiles()">切换班级档案</button>
+            <button onclick="syncNow()">立即同步配置</button>
+          </div>
+
+          <section class="card" id="profileCard" hidden>
+            <h2>切换班级档案</h2>
+            <div class="row">
+              <select id="profileSelect"></select>
+              <button class="primary" onclick="doSwitch()">切换</button>
+            </div>
+            <p class="hint">切换会改变当前班级的课表与值日人员，执行前会再确认一次。</p>
+          </section>
+
+          <section class="card">
+            <h2>值日表</h2>
+            <div id="dutyBox"><p class="hint">点上方「查看值日表」加载。</p></div>
+          </section>
+
+          <details><summary class="hint">原始数据（排查问题时用）</summary><pre id="out">—</pre></details>
+        </div>
+        <div id="toast"></div>
         <script>
         const token = new URLSearchParams(location.search).get('token') || '';
-        async function show(r){document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);}
-        async function load(p){show(await fetch(p+'?token='+encodeURIComponent(token)));}
-        async function post(p,body){show(await fetch(p+'?token='+encodeURIComponent(token),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));}
-        function switchProfile(){const name=prompt('目标档案名（如 YBH.json）：');if(!name)return;const ok=window.confirm('确认切换档案？此操作会改变当前班级档案。');post('/api/profile/switch',{to:name,confirm:ok?'yes':'no'});}
-        </script></body></html>
+        const STATE = { None: '空闲', PrepareOnClass: '预备铃', OnClass: '上课中', Breaking: '课间', AfterSchool: '放学' };
+        const $ = function (id) { return document.getElementById(id); };
+
+        function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+        function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(function () { t.classList.remove('show'); }, 2600); }
+        function hhmm(v) { return new Date(v).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
+        function left(sec) { if (sec == null) return ''; return sec >= 60 ? Math.floor(sec / 60) + ' 分 ' + (sec % 60) + ' 秒' : sec + ' 秒'; }
+        function baseName(p) { const s = String(p || ''); const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')); return i >= 0 ? s.slice(i + 1) : s; }
+        function dump(r) { $('out').textContent = JSON.stringify(r, null, 2); }
+
+        async function api(path, opt) {
+          const sep = path.indexOf('?') >= 0 ? '&' : '?';
+          const r = await fetch(path + sep + 'token=' + encodeURIComponent(token), opt);
+          return r.json();
+        }
+
+        async function refresh() {
+          try {
+            const r = await api('/api/status');
+            dump(r);
+            if (!r.ok) { toast(r.message || '状态读取失败'); return; }
+            const d = r.data || {};
+            const s = $('state');
+            s.textContent = STATE[d.virtualState] || d.virtualState || '未知';
+            s.dataset.s = d.virtualState || '';
+            $('next').textContent = d.nextBellAt
+              ? '下一次铃 ' + hhmm(d.nextBellAt) + (d.secondsToNextBell != null ? ' · ' + left(d.secondsToNextBell) + '后' : '')
+              : '今天没有更多铃声';
+            const bits = [];
+            if (d.currentMoment && d.currentMoment.subject) bits.push('当前：' + d.currentMoment.subject);
+            if (d.bellConfiguredSlots != null) bits.push('已配置 ' + d.bellConfiguredSlots + ' 节课');
+            if (d.profile) bits.push('档案：' + baseName(d.profile));
+            $('meta').textContent = bits.join(' · ') || '—';
+            if (d.duty) renderDuty(d.duty);
+          } catch (e) {
+            $('state').textContent = '连不上插件';
+            $('next').textContent = String(e);
+          }
+        }
+
+        function renderDuty(duty) {
+          const box = $('dutyBox');
+          box.replaceChildren();
+          if (!duty || !duty.items || duty.items.length === 0) { box.append(el('p', 'hint', '当前时段没有值日安排。')); return; }
+          box.append(el('p', 'hint', (duty.slotLabel || '') + (duty.date ? ' · ' + duty.date : '')));
+          duty.items.forEach(function (it) {
+            const row = el('div', 'duty-item');
+            row.append(el('span', 'duty-proj', it.project || ''));
+            const names = (it.persons || []).map(function (p) { return p.name; }).join('、') || '—';
+            row.append(el('span', 'duty-names', names));
+            box.append(row);
+          });
+        }
+
+        async function loadDuty() {
+          try {
+            const r = await api('/api/duty');
+            dump(r);
+            if (!r.ok) { toast(r.message || '读取失败'); return; }
+            const d = r.data || {};
+            renderDuty(d.current || (d.views && d.views[0]));
+          } catch (e) { toast('读取失败：' + e); }
+        }
+
+        async function loadProfiles() {
+          try {
+            const r = await api('/api/profiles');
+            dump(r);
+            if (!r.ok) { toast(r.message || '读取失败'); return; }
+            const list = (r.data && r.data.profiles) || [];
+            const sel = $('profileSelect');
+            sel.replaceChildren();
+            list.forEach(function (name) {
+              const o = document.createElement('option');
+              o.value = name;
+              o.textContent = baseName(name);
+              sel.append(o);
+            });
+            $('profileCard').hidden = list.length === 0;
+            if (!list.length) toast('没有可切换的档案');
+          } catch (e) { toast('读取失败：' + e); }
+        }
+
+        async function doSwitch() {
+          const name = $('profileSelect').value;
+          if (!name) return;
+          if (!confirm('确定切换到「' + name + '」？这会改变当前班级的课表与值日人员。')) return;
+          const r = await api('/api/profile/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: name, confirm: 'yes' }) });
+          dump(r);
+          toast(r.ok ? '已切换' : (r.message || '切换失败'));
+          if (r.ok) refresh();
+        }
+
+        async function switchLayout(to) {
+          if (!confirm(to === 'class' ? '切到上课布局？' : '切到下课布局？')) return;
+          const r = await api('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'layout.switch', args: { to: to }, apply: true, dryRun: false }) });
+          dump(r);
+          toast(r.ok ? '已切换布局' : (r.message || '切换失败'));
+        }
+
+        async function syncNow() {
+          const r = await api('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          dump(r);
+          toast(r.ok ? '同步完成' : (r.message || '同步失败'));
+        }
+
+        refresh();
+        setInterval(refresh, 30000);
+        </script>
+        </body></html>
         """;
 }
