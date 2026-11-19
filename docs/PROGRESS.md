@@ -192,3 +192,68 @@ MD5 `474B9F2B1571F2E8508235E981D57782` 与构建产物一致；旧版备份 `art
 `cex` 同步更新到 1.0.0.3。
 
 未完成：本机安全策略仍拦截 WMI 启动宿主，档案编辑器内的实际渲染要用户打开确认。
+
+## 2026-11-20 凌晨 · 四项收尾与 1.0.0.4（界面切换页 / 课间禁用 / 值日迁移 / 远程站）
+
+用户一次提了四件事，逐条闭环。
+
+**① 课间也显示预备铃输入框 → 语义澄清 + UI 收紧。**
+先证伪了"课间会响预备铃"：`BellTimelineService` 只处理 `TimeType` 0/1，
+`BellTimelineCalculator` 第 54 行 `if (slot.Kind != BellSlotKind.Class) continue;`，
+课间根本进不了计算。问题出在 UI：`AttachedSettingsControlBase` 拿不到当前时点类型，
+课间时段也照常渲染可编辑输入框。宿主运行时其实有 `AttachedTimePointTimeType`
+（Core.dll 里有 `get_/set_`），但编译期 PluginSdk 2.0.0.2 没有公开——改用反射探测，
+0=上课、1=课间、2=其他。非 0 时禁用输入框、把 `IsAttachSettingsEnabled` 置 false（不写回档案），
+并换成一段中文说明。反射拿不到时按"上课"处理，保持旧行为。
+
+**②「界面切换」补设置页。**
+`Features/Layout/` 之前只有 `layout.json` 和 applier，没有任何 UI。新增
+`LayoutSettingsPage`（`[SettingsPageInfo("yibianhui.classexland.layout", …)]`）：
+上下课两套组件配置 / 缩放 / 不透明度、下课延迟与拖堂顺延、立即切到上课或下课、
+恢复默认、一键生成宿主自动化片段并复制、打开配置文件夹与日志。
+组件配置下拉走 `ILayoutApplier.GetComponentConfigNames()`（新接口方法）——
+反射读宿主 `ComponentConfigs`，`IDictionary` 取键、`IEnumerable` 取 `Name`，
+读不到就返回空数组，页面退化成纯文本框，不会崩。
+
+**③ 旧值日配置迁移。**
+按 `dutylist.jimmyxiao/duty.json`（Groups/DayConfig/SkipDays）生成
+`yibianhui.classexland/duty.json`：1 个方案、3 个时段、23 条值日项。
+踩到本项目最隐蔽的坑：宿主 `ConfigureFileHelper.SerializerOptions` 是 `new JsonSerializerOptions()`，
+**默认 PascalCase 且大小写敏感**；第一版迁移脚本按 camelCase 写（`weekDays`/`items`），
+读回来 `WeekDays` 停在默认「周日到周四」、`Items` 为空、方案名变成"值日表"。
+用宿主真实的 `ConfigureFileHelper.LoadConfig` 复现后确认，改成混合大小写
+（带 `[JsonPropertyName]` 的字段仍是 camelCase，其余 PascalCase）才通过。
+另一个修正：`WeekDays` 先全 false 再按实际出现的天置 true——插件默认值是"周日到周四"，
+直接套用会把周六弄错。原文件两处备份，`docs/CONFIGURATION.md` 已写清这个大小写规则。
+
+**④ 远程站在用户自己的服务器上落地。**
+写了一套四个文件的 PHP 远程站（`server/remote-station/`，仓库内随源码发布）：
+首启 `setup` 生成令牌与 HMAC 密钥 → 登录 → 管理面板（发布快照、下发指令、改令牌、看最近访问）。
+部署到 `https://qn.yibianhui.cn/remote/`，PHP 8.5，`www:www`，`data/` 750、`data/*.php` 640，
+`php -l` 全过，无令牌 401 / 带令牌 200 / 管理页 200 / `X-ClassExland-Signature` 正确。
+
+过程中两个坑：
+
+- **opcache 把 `include` 的 PHP 配置读成旧内容**：发布后管理页 flash 说"已发布 20261120-004511"，
+  清单却还是空快照。改成 `<?php exit; ?>\n{json}` 格式 + `file_get_contents` 读，
+  兼容旧格式并自动转换；`cx_read_store` 的 `include` 分支加 `strpos($raw,'exit;')===false` 防死循环。
+- **清单必须字节级透传**：`cx_build_manifest` 用字符串拼接把 `snapshot.pluginConfigs` 里的
+  每个文件原样嵌进去，绝不 decode/encode——否则 PascalCase 会被 JSON 库改成 camelCase，
+  和 ③ 的坑撞在一起。
+- 本机到 `qn.yibianhui.cn` 必须 `curl --noproxy '*'`（127.0.0.1:5487 代理不通），直连正常。
+- 客户端签名校验改成读响应头 `X-ClassExland-Signature`（对响应原文 HMAC-SHA256），
+  旧的"清单内 signature 字段"协议保留兼容；两路都过不了才拒绝应用。
+
+**发版与部署。**
+构建 0 错误、单测 42/42、`ClassExland.cipx` 285015 B；`main` 推送 + `v1.0.0.4` tag，
+CI（windows-latest）2m 0s 成功，Release 附 `ClassExland.cipx`（268 KB，
+sha256 `8052142d…f567bb`）与 `SHA256SUMS`。
+实机 `data/Plugins/yibianhui.classexland/` 已覆盖 DLL（507904 B）+ `manifest.yml`；
+宿主当时在运行，用"先改名再写入"的方式换掉被占用的 DLL，旧 DLL 移到 `artifacts/backup-1.0.0.3/`，
+不重启宿主也能完成部署。`cex` 用 `-p:PublishSingleFile=true` 重新发布（186826 B）并覆盖安装。
+
+**未完成 / 待用户决定。**
+
+- 新 DLL 要等宿主下次启动才生效——课间禁用与「界面切换」页的实际渲染尚未肉眼确认。
+- 远程站目前仍是空快照。`duty.json` 里有真实学生姓名，按既有隐私约定**没有**自动上传，
+  等用户确认后再发布首个正式快照。
