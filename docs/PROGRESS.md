@@ -257,3 +257,10 @@ sha256 `8052142d…f567bb`）与 `SHA256SUMS`。
 - 新 DLL 要等宿主下次启动才生效——课间禁用与「界面切换」页的实际渲染尚未肉眼确认。
 - 远程站目前仍是空快照。`duty.json` 里有真实学生姓名，按既有隐私约定**没有**自动上传，
   等用户确认后再发布首个正式快照。
+
+> 补记（同日）：`AttachedTimePointTimeType` 的可见性用 `dnfile` 直接解析宿主
+> `app-2.1.0.1-0/ClassIsland.Core.dll` 的元数据确认过——声明在
+> `ClassIsland.Core.Abstractions.Controls.AttachedSettingsControlBase`（正是本插件的基类），
+> 访问标志 `mdPublic=True`，属性类型是 `int`。所以 `GetType().GetProperty("AttachedTimePointTimeType")`
+> 一定能拿到，不需要 `NonPublic` 兜底（试过一版，为保持源码与已发布二进制一致又回退了）。
+> 探针脚本留在 `artifacts/probe_attached_type.py`，以后核宿主 API 可直接复用。
