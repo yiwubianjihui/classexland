@@ -4,6 +4,34 @@
 
 ## [未发布]
 
+## [1.0.0.4] - 2026-11-20
+
+### 新增
+
+- **界面切换设置页**：设置 → ClassExland →「界面切换」。上课 / 下课两套组件配置、缩放、不透明度，
+  下课延迟、拖堂顺延步长与次数都能在界面里改；可「立即切到上课 / 下课」验证效果、一键恢复默认。
+  页面还能生成并复制「推荐自动化」片段，给想用宿主自带自动化的人兜底。
+- **远程站（服务端）**：配套的 PHP 远程站已部署在 `https://qn.yibianhui.cn/remote/`，
+  带管理界面（发布配置快照、下发指令、查看最近访问），令牌与签名密钥只存在服务器与本机 `remote.json`。
+
+### 修复
+
+- **课间时段不再显示可编辑的预备铃**：附加设置控件现在通过宿主运行时的 `AttachedTimePointTimeType`
+  判断当前是上课（0）还是课间（1）/其他。课间会禁用输入框并说明「不参与计算」，
+  也不会把无意义的值写进档案。此前课间也显示输入框，容易让人以为课间会响预备铃。
+  （预备铃本来就只对上课时段生效，`BellTimelineCalculator` 会跳过非上课段。）
+- **远程签名改用响应头**：`X-ClassExland-Signature` 直接对响应原文做 HMAC-SHA256，
+  服务端用 PHP 的 `hash_hmac` 就能对上；旧的「清单内 signature 字段」协议保留兼容。
+  原实现对 JSON 重新序列化后再算签名，跨语言几乎不可能对齐。
+
+### 文档
+
+- `docs/CONFIGURATION.md` 补充：`duty.json` 是**混合大小写**——带 `[JsonPropertyName]` 的字段是 camelCase
+  （`enabled` / `plans` / `rotation` / `activePlanIndex`…），其余字段是 PascalCase
+  （`WeekDays` / `TimeSlots` / `Items` / `Project`…）。手工或用脚本改这个文件时必须照这个规则写，
+  否则插件读不到（已用宿主真实的 `ConfigureFileHelper` 验证）。
+- `docs/REMOTE-SYNC.md` 增加远程站部署与运维章节。
+
 ## [1.0.0.3] - 2026-11-20
 
 ### 新增

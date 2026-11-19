@@ -1,3 +1,4 @@
+using ClassIsland.Core.Extensions.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -19,6 +20,9 @@ public static class LayoutRegistration
         services.AddSingleton<LayoutModule>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<LayoutModule>());
         services.AddSingleton<ILayoutService>(sp => sp.GetRequiredService<LayoutModule>());
+
+        // 面向普通用户的设置页：上课/下课布局、缩放、不透明度、延迟与拖堂保护。
+        services.AddSettingsPage<LayoutSettingsPage>();
         return services;
     }
 }
@@ -40,4 +44,6 @@ internal sealed class NoOpLayoutApplier : ILayoutApplier
         _log.Warn($"[{target}] 跳过应用：{_reason}");
         return Task.FromResult(new LayoutApplyResult(false, _reason));
     }
+
+    public IReadOnlyList<string> GetComponentConfigNames() => Array.Empty<string>();
 }

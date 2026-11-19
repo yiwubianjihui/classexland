@@ -18,7 +18,9 @@
 - **地址不写进代码**：服务器地址只写在外部配置 `remote.json` 的 `ServerUrl`（或环境变量），插件二进制中不含任何服务器地址。
 - **用户自托管**：插件不提供也不依赖任何官方/第三方服务器；你需要自己搭建并维护服务端。
 - **仅 HTTPS**：`ServerUrl` 必须以 `https://` 开头，证书校验默认开启；不允许通过配置关闭校验（本地开发需显式、单独的开关）。
-- **令牌 + HMAC 双因子**：每个请求携带 `Authorization: Bearer <token>`；消息体附带 HMAC-SHA256 签名，服务端与客户端共享密钥。令牌与密钥通过环境变量或仅当前用户可读的本机文件提供，**不硬编码、不进仓库**。
+- **令牌 + HMAC 双因子**：每个请求携带 `Authorization: Bearer <token>`；配了签名密钥时，服务端返回
+  `X-ClassExland-Signature: hex(hmac_sha256(密钥, 响应原文))`，客户端对**原始字节**验签。
+  令牌与密钥只存服务器与本机 `remote.json`，**不硬编码、不进仓库**。
 - **离线可用**：无网络时插件照常本地工作；同步失败只记审计日志并保留本地配置，不影响上课铃与值日提醒。
 - **失败回滚**：任何写入前先备份；签名校验失败、版本冲突或中途出错时回滚到上一版本快照。
 - **可停用**：`remote.json` 的 `Enabled: false` 或设置页一键关闭；关闭后不再发起任何网络请求。
@@ -36,6 +38,38 @@
 - 客户端用 `Bearer` 令牌鉴权，可选 HMAC-SHA256 验签；**不支持写入回调 / ack**，服务端无需保存客户端状态。
 - 版本：清单里放一个单调递增的 `version` 与唯一 `etag`；两者都没变则客户端直接跳过。
 - 远程下发的指令只在本机执行，执行结果写本机 `audit.log`，不回传服务器。
+
+## 开箱可用的远程站（PHP）
+
+`server/remote-station/` 是一个完整的参考实现，放到任意 PHP 8 主机即可：
+
+| 文件 | 作用 |
+|---|---|
+| `manifest.php` | 插件拉取的清单端点（Bearer 鉴权 + 可选签名头） |
+| `index.php` | 管理界面：发布配置快照、下发指令、查看最近访问、改令牌/密钥/密码 |
+| `lib.php` | 公共库（读写状态、签名、鉴权） |
+| `data/` | 自动生成，存 `config.php`（密钥）与 `state.php`（已发布快照） |
+
+部署步骤：
+
+1. 把三个 PHP 文件传到站点子目录（例如 `/www/wwwroot/<站点>/remote/`）；
+2. 把 `install.php` 也传上去，执行 `php install.php '<管理员密码>'`（至少 8 位）。
+   脚本会生成 `data/config.php` 与 `data/state.php`，打印访问令牌与签名密钥，然后自删
+   （它只接受命令行运行，Web 访问返回 404）；
+3. `chown -R www:www remote && chmod 750 remote/data && chmod 640 remote/data/*.php`；
+4. 浏览器打开 `https://<站点>/remote/`，用管理员密码登录，把「服务器地址 + 清单路径 + 令牌」填进插件。
+
+`data/` 里两个文件都以 `<?php exit; ?>` 开头、后面跟 JSON：直接访问时 PHP 立即退出、不输出内容，
+读取走 `file_get_contents` 而不是 `include`——宝塔的 opcache 可能关闭了时间戳校验，
+用 `include` 会把刚发布的版本读回旧值（实测踩过）。
+
+安全约定：
+
+- 管理密码用 `password_hash`，令牌比较用 `hash_equals`；表单带 CSRF 校验，Cookie 为 `HttpOnly` + `SameSite=Lax`。
+- 只允许发布 `bell.json` / `duty.json` / `activities.json` / `layout.json` 四个白名单文件，
+  每个都必须是合法 JSON；客户端还会再做一次 `CoreConfigPolicy` 校验。
+- 令牌、签名密钥、学生名单都在 `data/` 里，**不要提交到仓库，也不要放进可公开访问的目录**。
+- 想彻底关掉签名，把 `HmacSecret` 留空即可（仅剩 HTTPS + Bearer，仍是加密通道）。
 
 ## 清单 JSON 格式（实际实现）
 

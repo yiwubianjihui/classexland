@@ -99,6 +99,52 @@ public sealed class HostLayoutApplier : ILayoutApplier
         }
     }
 
+    /// <summary>
+    /// 列出宿主现有的组件配置名，供设置页下拉选择。
+    /// 宿主版本差异较大（Dictionary / ObservableCollection 都出现过），这里只按"能拿到名字就拿"处理，
+    /// 失败返回空列表，界面仍允许手工输入配置名。
+    /// </summary>
+    public IReadOnlyList<string> GetComponentConfigNames()
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var service = ResolveSettingsService();
+            if (service is null) return Array.Empty<string>();
+
+            var container = ReadProperty(service, "ComponentConfigs")
+                            ?? ReadProperty(ReadProperty(service, "Settings"), "ComponentConfigs");
+            if (container is null) return Array.Empty<string>();
+
+            if (container is System.Collections.IDictionary dictionary)
+            {
+                foreach (var key in dictionary.Keys)
+                {
+                    var text = key?.ToString();
+                    if (!string.IsNullOrWhiteSpace(text)) names.Add(text!);
+                }
+                return names.ToList();
+            }
+
+            if (container is System.Collections.IEnumerable items)
+            {
+                foreach (var item in items)
+                {
+                    if (item is null) continue;
+                    var text = item as string ?? ReadProperty(item, "Name") as string;
+                    if (!string.IsNullOrWhiteSpace(text)) names.Add(text!);
+                }
+            }
+
+            return names.ToList();
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"读取宿主组件配置名失败：{ex.GetType().Name}: {ex.Message}");
+            return Array.Empty<string>();
+        }
+    }
+
     private object? ResolveSettingsService()
     {
         lock (_gate)

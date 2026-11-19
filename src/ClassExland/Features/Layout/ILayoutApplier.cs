@@ -14,4 +14,7 @@ public sealed record LayoutApplyResult(bool Ok, string Message);
 public interface ILayoutApplier
 {
     Task<LayoutApplyResult> ApplyAsync(LayoutTargetKind target, LayoutConfig config, CancellationToken ct = default);
+
+    /// <summary>列出宿主现有的组件配置名（用于设置页下拉框）；读不到时返回空列表。</summary>
+    IReadOnlyList<string> GetComponentConfigNames();
 }

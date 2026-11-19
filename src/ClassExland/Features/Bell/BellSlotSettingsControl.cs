@@ -100,7 +100,15 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             _syncing = false;
         }
 
-        UpdateHint();
+        // 课间/其他时段本来就不会响预备铃（时间轴只对上课时段生效）。
+        // 这里把输入框禁用，并且不让宿主把这项写回档案，避免用户改了半天却不生效。
+        var type = TryGetTimePointType();
+        var isClassSlot = type is null or 0;
+        _prepBox.IsEnabled = isClassSlot;
+        if (!isClassSlot && settings is not null)
+            settings.IsAttachSettingsEnabled = false;
+
+        UpdateHint(type);
     }
 
     /// <summary>输入框 → 设置对象。宿主保存档案时会带上这个对象。</summary>
@@ -123,13 +131,45 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             settings.PrepSeconds = clamped;
     }
 
-    private void UpdateHint()
+    /// <summary>
+    /// 读取宿主注入的时间点类型：0 = 上课，1 = 课间，2 = 其他（放学前等）。
+    /// 编译期的 PluginSdk 2.0.0.2 没有这个属性，宿主 2.1 运行时才有，所以走反射；
+    /// 读不到时返回 null，按"上课"处理（与 1.0.0.3 行为一致，不会因为反射失败而禁用）。
+    /// </summary>
+    private int? TryGetTimePointType()
+    {
+        try
+        {
+            var property = GetType().GetProperty("AttachedTimePointTimeType");
+            var raw = property?.GetValue(this);
+            if (raw is null) return null;
+            return raw is int value ? value : Convert.ToInt32(raw, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            // 宿主版本不支持 / 属性类型变化：退回不区分时段。
+            return null;
+        }
+    }
+
+    private void UpdateHint(int? timePointType)
     {
         if (_hint is null) return;
 
-        // PluginSdk 2.0.0.2 的基类没有暴露时间点类型（更高版本才有 AttachedTimePointTimeType），
-        // 所以这里不区分上课/课间，统一提示"只对上课时段生效"。
-        _hint.Text = $"上课时段开始前 {MinPrepSeconds}–{MaxPrepSeconds} 秒进入预备状态；0 表示不提前。"
-                     + "只对上课时段生效，改完保存档案即可。";
+        if (timePointType is null)
+        {
+            _hint.Text = $"上课时段开始前 {MinPrepSeconds}–{MaxPrepSeconds} 秒进入预备状态；0 表示不提前。"
+                         + "只对上课时段生效，改完保存档案即可。";
+            return;
+        }
+
+        if (timePointType == 0)
+        {
+            _hint.Text = $"这节课开始前 {MinPrepSeconds}–{MaxPrepSeconds} 秒进入预备状态；0 表示不提前。"
+                         + "改完保存档案即可，不需要重启。";
+            return;
+        }
+
+        _hint.Text = "当前是课间（或放学等非上课时段），预备铃只在上课时段之前响，这项设置不参与计算。";
     }
 }

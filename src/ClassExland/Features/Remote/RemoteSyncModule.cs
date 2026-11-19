@@ -207,6 +207,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         {
             // 1) 下载（https + Bearer + 超时）
             string raw;
+            string? headerSignature = null;
             using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) })
             {
                 var url = cfg.ServerUrl + cfg.ManifestPath;
@@ -220,6 +221,10 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                     report.Ok = false;
                     return report;
                 }
+
+                if (resp.Headers.TryGetValues("X-ClassExland-Signature", out var values))
+                    headerSignature = values.FirstOrDefault();
+
                 raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             }
 
@@ -235,21 +240,16 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             report.Version = manifest.Version;
             report.ETag = manifest.ETag;
 
-            // 2) 可选 HMAC-SHA256 签名校验（对"去掉 signature 字段后的清单原文"计算，
-            //    否则签名必须包含自己，永远对不上）
-            if (!string.IsNullOrEmpty(cfg.HmacSecret))
+            // 2) 可选 HMAC-SHA256 签名校验。
+            //    优先用响应头 X-ClassExland-Signature：它对响应原文直接签名，服务端用任何语言都好实现
+            //    （PHP 的 hash_hmac 直接对上）；没有头时退回旧协议——对去掉 signature 字段后的清单计算。
+            if (!string.IsNullOrEmpty(cfg.HmacSecret)
+                && !VerifySignature(raw, headerSignature, manifest.Signature, cfg.HmacSecret))
             {
-                var expected = ComputeHmac(StripSignature(raw), cfg.HmacSecret);
-                if (string.IsNullOrEmpty(manifest.Signature) ||
-                    !CryptographicOperations.FixedTimeEquals(
-                        Encoding.UTF8.GetBytes(expected),
-                        Encoding.UTF8.GetBytes(manifest.Signature.ToUpperInvariant())))
-                {
-                    report.Add("HMAC 签名校验失败，拒绝应用");
-                    _audit.Log("hmac-fail", $"version={manifest.Version}", ok: false);
-                    report.Ok = false;
-                    return report;
-                }
+                report.Add("HMAC 签名校验失败，拒绝应用");
+                _audit.Log("hmac-fail", $"version={manifest.Version}", ok: false);
+                report.Ok = false;
+                return report;
             }
 
             // 2.5) 白名单/黑名单安全策略：出现禁止键/文件/指令 ⇒ 整份拒绝，绝不部分应用。
@@ -373,6 +373,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         try
         {
             string raw;
+            string? headerSignature = null;
             using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) })
             {
                 var url = cfg.ServerUrl + cfg.ManifestPath;
@@ -386,6 +387,10 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                     report.Ok = false;
                     return report;
                 }
+
+                if (resp.Headers.TryGetValues("X-ClassExland-Signature", out var values))
+                    headerSignature = values.FirstOrDefault();
+
                 raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             }
 
@@ -400,18 +405,13 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             report.Version = manifest.Version;
             report.ETag = manifest.ETag;
 
-            if (!string.IsNullOrEmpty(cfg.HmacSecret))
+            if (!string.IsNullOrEmpty(cfg.HmacSecret)
+                && !VerifySignature(raw, headerSignature, manifest.Signature, cfg.HmacSecret))
             {
-                var expected = ComputeHmac(StripSignature(raw), cfg.HmacSecret);
-                if (string.IsNullOrEmpty(manifest.Signature) ||
-                    !CryptographicOperations.FixedTimeEquals(
-                        Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(manifest.Signature.ToUpperInvariant())))
-                {
-                    report.Add("HMAC 签名校验失败");
-                    _audit.Log("poll-hmac-fail", manifest.Version, ok: false);
-                    report.Ok = false;
-                    return report;
-                }
+                report.Add("HMAC 签名校验失败");
+                _audit.Log("poll-hmac-fail", manifest.Version, ok: false);
+                report.Ok = false;
+                return report;
             }
 
             var (lastVersion, lastETag) = _state.Load();
@@ -488,6 +488,36 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         catch (Exception ex)
         {
             _audit.Log("bell-refresh-fail", ex.Message, ok: false);
+        }
+    }
+
+    /// <summary>
+    /// 校验服务端签名。两种协议：
+    ///  1. 响应头 <c>X-ClassExland-Signature</c>：hex(hmac_sha256(secret, 响应原文))，跨语言最容易对齐；
+    ///  2. 兼容旧协议：清单里的 <c>signature</c> 字段，对去掉该字段后的紧凑 JSON 计算。
+    /// </summary>
+    private static bool VerifySignature(string raw, string? headerSignature, string bodySignature, string secret)
+    {
+        if (!string.IsNullOrWhiteSpace(headerSignature))
+            return FixedTimeEquals(ComputeHmac(raw, secret), headerSignature);
+
+        if (!string.IsNullOrWhiteSpace(bodySignature))
+            return FixedTimeEquals(ComputeHmac(StripSignature(raw), secret), bodySignature);
+
+        return false;
+    }
+
+    private static bool FixedTimeEquals(string expected, string actual)
+    {
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(expected.ToUpperInvariant()),
+                Encoding.UTF8.GetBytes(actual.Trim().ToUpperInvariant()));
+        }
+        catch
+        {
+            return false;
         }
     }
 

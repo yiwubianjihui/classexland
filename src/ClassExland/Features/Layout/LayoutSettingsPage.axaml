@@ -1,0 +1,85 @@
+<ci:SettingsPageBase xmlns="https://github.com/avaloniaui"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                     xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                     x:Class="ClassExland.Features.Layout.LayoutSettingsPage">
+    <ScrollViewer>
+        <StackPanel Margin="16" Spacing="10">
+            <TextBlock Text="界面切换（上课 / 下课）" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="预备铃响时自动切到上课用的紧凑布局，下课后延迟若干秒切回完整布局。只改宿主的界面设置，不覆盖自动化文件。"
+                       Opacity="0.7" TextWrapping="Wrap" />
+
+            <CheckBox x:Name="EnableCheck" Content="启用自动切换" />
+            <TextBlock x:Name="StatusText" Text="—" Opacity="0.75" TextWrapping="Wrap" />
+
+            <Separator />
+            <TextBlock Text="上课布局（预备铃起）" FontWeight="SemiBold" />
+            <Grid ColumnDefinitions="110,230" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,2">
+                <TextBlock Text="组件配置" VerticalAlignment="Center" />
+                <TextBox x:Name="ClassConfigBox" Grid.Column="1" Width="220" HorizontalAlignment="Left" />
+                <ComboBox x:Name="ClassConfigCombo" Grid.Row="1" Grid.Column="1" Width="220" HorizontalAlignment="Left"
+                          Margin="0,4,0,0" PlaceholderText="从现有配置中选择"
+                          SelectionChanged="ClassConfigCombo_OnSelectionChanged" />
+                <TextBlock Grid.Row="2" Text="缩放" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="ClassScaleBox" Grid.Row="2" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+                <TextBlock Grid.Row="3" Text="不透明度" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="ClassOpacityBox" Grid.Row="3" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+            </Grid>
+
+            <Separator />
+            <TextBlock Text="下课布局（下课后延迟 D 秒）" FontWeight="SemiBold" />
+            <Grid ColumnDefinitions="110,230" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,2">
+                <TextBlock Text="组件配置" VerticalAlignment="Center" />
+                <TextBox x:Name="BreakConfigBox" Grid.Column="1" Width="220" HorizontalAlignment="Left" />
+                <ComboBox x:Name="BreakConfigCombo" Grid.Row="1" Grid.Column="1" Width="220" HorizontalAlignment="Left"
+                          Margin="0,4,0,0" PlaceholderText="从现有配置中选择"
+                          SelectionChanged="BreakConfigCombo_OnSelectionChanged" />
+                <TextBlock Grid.Row="2" Text="缩放" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="BreakScaleBox" Grid.Row="2" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+                <TextBlock Grid.Row="3" Text="不透明度" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="BreakOpacityBox" Grid.Row="3" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+            </Grid>
+
+            <Separator />
+            <TextBlock Text="节奏（拖堂保护）" FontWeight="SemiBold" />
+            <Grid ColumnDefinitions="180,120" RowDefinitions="Auto,Auto,Auto" Margin="0,2">
+                <TextBlock Text="下课后延迟（秒，0-300）" VerticalAlignment="Center" />
+                <TextBox x:Name="ClassEndDelayBox" Grid.Column="1" Width="100" HorizontalAlignment="Left" />
+                <TextBlock Grid.Row="1" Text="拖堂时每次顺延（秒）" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="PostponeStepBox" Grid.Row="1" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+                <TextBlock Grid.Row="2" Text="最多顺延次数" VerticalAlignment="Center" Margin="0,8,0,0" />
+                <TextBox x:Name="MaxPostponesBox" Grid.Row="2" Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Margin="0,8,0,0" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                <Button x:Name="ButtonSave" Content="保存" Width="100" Click="ButtonSave_OnClick" />
+                <Button x:Name="ButtonClass" Content="立即切到上课" Width="130" Click="ButtonClass_OnClick" />
+                <Button x:Name="ButtonBreak" Content="立即切到下课" Width="130" Click="ButtonBreak_OnClick" />
+                <Button x:Name="ButtonReset" Content="恢复默认" Width="110" Click="ButtonReset_OnClick" />
+            </StackPanel>
+
+            <Separator />
+            <TextBlock Text="宿主自带的自动化（可选）" FontWeight="SemiBold" />
+            <TextBlock Text="如果你更想用 ClassIsland 自己的自动化，可复制下面的片段粘贴到自动化动作集里。本插件不会自动覆盖你的自动化文件。"
+                       Opacity="0.7" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="生成片段" Width="100" Click="ButtonGenerateAutomation_OnClick" />
+                <Button Content="复制到剪贴板" Width="130" Click="ButtonCopyAutomation_OnClick" />
+            </StackPanel>
+            <TextBox x:Name="AutomationBox" IsReadOnly="True" AcceptsReturn="True" Height="150"
+                     TextWrapping="Wrap" FontFamily="Consolas,Menlo,monospace" FontSize="12" />
+
+            <Separator />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="打开配置文件夹" Width="130" Click="ButtonOpenFolder_OnClick" />
+                <Button Content="查看日志" Width="100" Click="ButtonOpenLog_OnClick" />
+            </StackPanel>
+            <TextBlock x:Name="PathText" Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</ci:SettingsPageBase>

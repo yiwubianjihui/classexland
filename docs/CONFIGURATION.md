@@ -44,6 +44,9 @@
 
 在附加设置里关掉这一项，等同于"这一节没单独配置"，会回退到 `bell.json` 或默认值。
 
+> **只有上课时段（`TimeType = 0`）会响预备铃。** 课间（`TimeType = 1`）与放学前等其他时段的附加设置不参与计算：
+> 时间轴在构建时会直接跳过它们，附加设置界面也会禁用输入框并注明原因，不会把值写回档案。
+
 ### bell.json（每节课）
 
 ```jsonc
@@ -101,7 +104,15 @@
 
 ## 2. `duty.json` — 值日表与提醒
 
-轮换计算在**根级** `rotation`（字段 `startDate` / `periodDays` / `mode` / `skipWeekdays`），当前批次由根级 `activePlanIndex` 指定；`skipWeekdays` 用 `0=周日 … 6=周六`，跳过日不消耗"第 N 天"计数（对齐 DutyList 语义）。所有字段名以 camelCase 为准。
+轮换计算在**根级** `rotation`（字段 `startDate` / `periodDays` / `mode` / `skipWeekdays`），当前批次由根级 `activePlanIndex` 指定；`skipWeekdays` 用 `0=周日 … 6=周六`，跳过日不消耗"第 N 天"计数（对齐 DutyList 语义）。
+
+> ⚠️ **字段大小写是混合的**：带 `[JsonPropertyName]` 的字段用 camelCase（`enabled` / `plans` / `rotation` /
+> `startDate` / `periodDays` / `mode` / `skipWeekdays` / `activePlanIndex`），其余字段用 **PascalCase**
+> （`WeekDays` / `TimeSlots` / `Items` / `Project` / `Persons` / `SlotLabel` / `Weekday` / `Scope` /
+> `ClassEndDelaySeconds` …）。宿主用 `ConfigureFileHelper` 的默认序列化选项，不做大小写归一。
+>
+> 手工编辑、脚本迁移或远程快照都要照这个规则写：把 `WeekDays` 写成 `weekDays`，插件会静默读不到、
+> 退回默认值（周一至周五），而且不会报错。判断依据：插件自己保存的 `duty.json` 就是这个混合形态。
 
 ```jsonc
 {
