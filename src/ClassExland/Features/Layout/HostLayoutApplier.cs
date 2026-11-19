@@ -65,16 +65,26 @@ public sealed class HostLayoutApplier : ILayoutApplier
             };
 
             var settingsObject = ReadProperty(service, "Settings");
+            var writeTarget = service;
             foreach (var name in RequiredProperties)
             {
                 // 优先在服务本身设置，其次在 Settings 子对象上设置。
                 if (TrySetProperty(service, name, values[name])) continue;
-                if (settingsObject is not null && TrySetProperty(settingsObject, name, values[name])) continue;
+                if (settingsObject is not null && TrySetProperty(settingsObject, name, values[name]))
+                {
+                    writeTarget = settingsObject;
+                    continue;
+                }
 
                 var reason = $"宿主布局服务缺少可写属性 {name}";
                 _log.Warn($"[{target}] 应用失败：{reason}");
                 return Task.FromResult(new LayoutApplyResult(false, reason));
             }
+
+            // 回读校验：写不进去时不要谎报成功（曾经出现过"日志成功、实际没生效"）。
+            var readBack = ReadProperty(writeTarget, "CurrentComponentConfig")?.ToString();
+            if (!string.Equals(readBack, componentConfig, StringComparison.Ordinal))
+                _log.Warn($"[{target}] 回读不一致：期望 {componentConfig}，实际 {readBack ?? "<null>"}（目标类型 {writeTarget.GetType().Name}）");
 
             // 通过宿主服务自己的保存方法落盘，不在本模块直接写文件。
             TrySave(service);
@@ -179,16 +189,25 @@ public sealed class HostLayoutApplier : ILayoutApplier
     {
         try
         {
+            // 宿主 2.1.0.1 的签名是 SaveSettings(string note = "")：
+            // 唯一一个参数带默认值，所以不能按「参数个数为 0」筛选。
             var method = service.GetType()
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => (m.Name == "SaveSettings" || m.Name == "Save")
-                                     && m.GetParameters().Length == 0);
+                .Where(m => m.Name == "SaveSettings" || m.Name == "Save")
+                .Where(m => m.GetParameters().All(p => p.IsOptional))
+                .OrderBy(m => m.GetParameters().Length)
+                .FirstOrDefault();
             if (method is null)
             {
-                _log.Warn("未找到宿主 SaveSettings()，布局变更可能仅在内存中生效");
+                _log.Warn($"宿主 {service.GetType().Name} 上没有可调用的 Save 方法，布局变更可能仅在内存中生效");
                 return;
             }
-            method.Invoke(service, null);
+
+            var parameters = method.GetParameters();
+            var args = new object?[parameters.Length];
+            for (var i = 0; i < parameters.Length; i++)
+                args[i] = parameters[i].HasDefaultValue ? parameters[i].DefaultValue : Type.Missing;
+            method.Invoke(service, args);
         }
         catch (Exception ex)
         {

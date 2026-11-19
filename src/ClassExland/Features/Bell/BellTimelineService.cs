@@ -156,6 +156,7 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             {
                 _initialized = true;
                 FireMakeup(now);
+                SeedStateFromHistory(now);
             }
 
             FireDue(now);
@@ -235,6 +236,47 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
         foreach (var earlier in _moments.Where(m => m.At < makeup.At)) _fired.Add(Key(earlier));
         _logger.LogInformation("补发错过的预备铃事件：{Kind} @ {At}", makeup.Kind, makeup.At);
         Fire(makeup);
+    }
+
+    /// <summary>
+    /// 启动（或长时间休眠恢复）后，用"已经过去的时点"直接推导当前状态。
+    /// 不这么做的话 FireDue 会从当天最早的事件开始逐 tick 补发，等于把一上午的铃声
+    /// 与提醒全部回放一遍（实测午休启动连发 5 次上课状态切换）。
+    /// </summary>
+    private void SeedStateFromHistory(DateTimeOffset now)
+    {
+        var state = _virtualState;
+        foreach (var moment in _moments.OrderBy(m => m.At))
+        {
+            if (moment.At > now) break;
+            _fired.Add(Key(moment));
+            switch (moment.Kind)
+            {
+                case BellMomentKind.PrepareBell:
+                    state = VirtualTimeState.OnClass;
+                    break;
+                case BellMomentKind.ClassEnd:
+                    state = IsLastClass(moment.TimeLayoutItemId)
+                        ? VirtualTimeState.AfterSchool
+                        : VirtualTimeState.Breaking;
+                    break;
+                // 预告与正式上课仅提醒，不切换状态。
+            }
+        }
+
+        VirtualTimeState previous, current;
+        lock (_stateLock)
+        {
+            previous = _forcedState ?? _virtualState;
+            _virtualState = state;
+            current = _forcedState ?? _virtualState;
+        }
+
+        if (previous != current)
+        {
+            _logger.LogInformation("按历史时点推导当前状态：{Previous} -> {Current}", previous, current);
+            SafeRaise(VirtualStateChanged, current);
+        }
     }
 
     private void FireDue(DateTimeOffset now)

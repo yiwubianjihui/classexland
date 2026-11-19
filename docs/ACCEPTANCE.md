@@ -1,6 +1,7 @@
 # 验收清单（ClassExland 1.0.0.0）
 
-> 状态：**A / B / D 已完成**（含真实的 Release 构建、39 个单元测试、CI 发版流水线与线上 Release 校验），C 待装到 ClassIsland 实机验证。
+> 状态：**A / B / D 已完成**；**C 已在真机（ClassIsland 2.1.0.1）上开跑**，首轮暴露并修复 3 个问题（v1.0.0.1），
+> 铃声三连提醒、值日弹窗、拖堂顺延、设置页目视检查仍需在课节时段确认。
 >
 > 环境说明：本机会话的 bash 工具对中文路径会崩（`0xC0000409`），PowerShell 直启原生进程会抛
 > `AccessViolationException`。构建与 git 操作改由 **WMI `Win32_Process.Create`** 发起，已跑通。
@@ -58,15 +59,36 @@
 >
 > 结论：加载期不会因缺程序集失败。以下仍需实机确认。
 
-- [ ] 安装后插件未自动禁用；设置页各 Tab 正常显示。
+- [x] **安装后插件未自动禁用**：日志 `此次会话已加载插件: …,ClassExland(yibianhui.classexland,1.0.0.1)`；
+      同时注册了「ClassExland 预备铃」与「ClassExland 值日提醒」两个提醒提供方。
+- [ ] 设置页各 Tab 正常显示（未逐页目视确认）。
 - [ ] 每节课提前量可编辑；`T−N−60s` / `T−N` / `T` 三条提醒各出现一次。
 - [ ] Harmony 覆盖使宿主在 `T−N` 进入 OnClass；关闭开关后回落虚拟状态且不崩溃。
+      （日志已确认 patch 生效：`宿主状态覆盖已启用（patch ProcessLessons）`，但未到预备铃时刻验证效果。）
 - [ ] 下课延迟 D 后弹出值日提醒，约 17 秒后自动消失，不重复排队。
 - [ ] 特殊活动提前 10 分钟提醒，且附带值日名单。
-- [ ] 上课小界面 / 下课完整界面按状态切换；拖堂时可顺延。
+- [x] **上课小界面 / 下课完整界面按状态切换**：`[Break] 已应用 component=offclass scale=1 opacity=0.7`
+      且 `Settings.json` 同步落盘（mtime 与写入时刻一致）。拖堂顺延仍未验证。
 - [ ] 值日组件在编辑模式可选中；空数据显示「暂无安排」。
-- [ ] `cex status` / `cex config doctor` 正常；写命令默认 dry-run，`--yes` 才落盘。
-- [ ] 远程同步关闭时完全离线可用；开启后验签失败能回滚；核心配置白名单外的键被拒绝。
+- [x] **`cex status` / `config doctor` 正常**：`version` / `status` / `config doctor` / `duty show` /
+      `layout current` / `bell list` 均 `exit 0`；`doctor.healthy=true`、`issueCount=0`。
+- [x] **写命令默认 dry-run**：`cex bell set --slot … --prep 90` 输出「预览（未写入，需 --yes 生效）」，
+      随后 `bell.json` 仍为 `[]`。
+- [x] **远程同步关闭时完全离线可用**：`audit.log` 记录
+      `remote skip :: 未配置有效的 https 地址/令牌，或开关关闭；完全离线可用`，未发起网络请求。
+      开启后的验签失败回滚与白名单拒写仍未验证。
+
+### C.1 实机验收中修掉的问题（v1.0.0.1）
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 布局切换后 `Settings.json` 不变，日志称成功 | 宿主 `SaveSettings(string note = "")` 参数带默认值，旧实现只认「参数个数为 0」，永远匹配不上 | 接受全部参数可选的 `SaveSettings`/`Save`，按 `ParameterInfo.DefaultValue` 补实参 |
+| 2 | 午休启动时布局被切成上课样式 | 宿主启动期连续发状态变化，`StartAsync` 立刻读 `VirtualState` 读到瞬态 `OnClass` | 延后 1.5 s 再应用初始状态（实测 34.676 订阅 → 36.232 应用） |
+| 3 | 启动时连发 5 次「进入上课状态」，并会重放一上午的铃声 | `FireDue` 每 tick 只取最早的一条未触发事件，启动时把所有历史事件逐条补发 | 新增 `SeedStateFromHistory`：用历史时点直接推导当前状态，不触发提醒与铃声 |
+
+> 修复后同一场景日志：`按历史时点推导当前状态：None -> Breaking`，
+> 不再出现「取消待触发的下课切换」连发；`Settings.json` 从误写的 `Default/0.8/0.5`
+> 被重新写回 `offclass/1/0.7`，证明保存链路真的生效。
 
 ## D. 发版
 

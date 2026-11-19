@@ -103,8 +103,10 @@ public sealed class LayoutModule : IHostedService, ILayoutService
             _timeline.VirtualStateChanged += OnVirtualStateChanged;
             _log.Info($"LayoutModule 已订阅 IBellTimeline，Enabled={config.Enabled}");
 
-            // 首次启动强制重算一次，防止状态残留。
-            if (config.Enabled) ApplyInitialState();
+            // 首次启动重算一次，防止状态残留。
+            // 但宿主启动瞬间会连续发出多次状态变化，此刻读到的是瞬态（实测午休启动会读到 OnClass），
+            // 因此延后一拍，等时间轴稳定后再按真实状态应用。
+            if (config.Enabled) _ = ApplyInitialStateDeferredAsync();
         }
         catch (Exception ex)
         {
@@ -127,6 +129,19 @@ public sealed class LayoutModule : IHostedService, ILayoutService
             _log.Error($"LayoutModule.StopAsync 异常：{ex.GetType().Name}: {ex.Message}");
         }
         return Task.CompletedTask;
+    }
+
+    private async Task ApplyInitialStateDeferredAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5)).ConfigureAwait(false);
+            ApplyInitialState();
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"ApplyInitialStateDeferred 异常：{ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void ApplyInitialState()
