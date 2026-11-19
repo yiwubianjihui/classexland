@@ -96,7 +96,7 @@ dotnet restore ClassExland.sln
 dotnet build ClassExland.sln -c Release
 ```
 
-构建会生成 `.cipx` 包（输出目录 `src/ClassExland/bin/Release/net8.0/`；CI 中统一收集为 `cipx/ClassExland.cipx`）。把该包按"安装"一节导入 ClassIsland 即可。
+构建会在 `src/ClassExland/cipx/` 下生成 `ClassExland.cipx`（同目录的 `checksums.md` 是 SDK 生成的 MD5 摘要，仅本地参考）。CI 会把该包收集为 `cipx/ClassExland.cipx` 并在打 tag 时附上 `SHA256SUMS` 发布。把该包按"安装"一节导入 ClassIsland 即可。
 
 开发与协作规范见 [CONTRIBUTING.md](docs/CONTRIBUTING.md)。
 
