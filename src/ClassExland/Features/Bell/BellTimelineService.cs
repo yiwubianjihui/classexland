@@ -246,9 +246,11 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
     private void SeedStateFromHistory(DateTimeOffset now)
     {
         var state = _virtualState;
+        BellMoment? last = null;
         foreach (var moment in _moments.OrderBy(m => m.At))
         {
             if (moment.At > now) break;
+            last = moment;
             _fired.Add(Key(moment));
             switch (moment.Kind)
             {
@@ -271,6 +273,9 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             _virtualState = state;
             current = _forcedState ?? _virtualState;
         }
+
+        // 最近一次已过去的时点仍要如实上报（cex status 的 currentMoment 依赖它）。
+        Current = last;
 
         if (previous != current)
         {

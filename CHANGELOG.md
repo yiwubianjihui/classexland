@@ -2,6 +2,13 @@
 
 本项目所有重要变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号与 `manifest.yml` / `ClassExland.csproj` 保持一致。
 
+## [未发布]
+
+### 修复
+
+- `cex status` 的 `currentMoment` 在启动后为 `null`：状态改由历史推导后没有记录"最近一次已过去的时点"。
+  现按最后一个已过去的事件回填。（1.0.0.1 已发布版本存在此问题，随下个版本修复。）
+
 ## [1.0.0.1] - 2026-11-19
 
 实机验收（ClassIsland 2.1.0.1）发现并修复。
