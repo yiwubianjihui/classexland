@@ -1,7 +1,6 @@
 <ci:SettingsPageBase xmlns="https://github.com/avaloniaui"
                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                      xmlns:ci="http://classisland.tech/schemas/xaml/core"
-                     xmlns:datagrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
                      x:Class="ClassExland.Features.Bell.BellSettingsPage">
     <ScrollViewer>
         <StackPanel Margin="16" Spacing="10">
@@ -49,18 +48,35 @@
                 <Button x:Name="ButtonReloadSlots" Content="从课表刷新" Width="110" Click="ButtonReloadSlots_OnClick" />
                 <Button x:Name="ButtonApplySlots" Content="应用每节课设置" Width="140" Click="ButtonApplySlots_OnClick" />
             </StackPanel>
-            <datagrid:DataGrid x:Name="SlotGrid"
-                               AutoGenerateColumns="False"
-                               CanUserReorderColumns="False"
-                               CanUserResizeColumns="True"
-                               GridLinesVisibility="Horizontal"
-                               Height="260">
-                <datagrid:DataGrid.Columns>
-                    <datagrid:DataGridTextColumn Header="课次" Binding="{Binding Display}" Width="*" IsReadOnly="True" />
-                    <datagrid:DataGridCheckBoxColumn Header="单独设置" Binding="{Binding UseOverride}" Width="90" />
-                    <datagrid:DataGridTextColumn Header="提前量（秒）" Binding="{Binding PrepText}" Width="120" />
-                </datagrid:DataGrid.Columns>
-            </datagrid:DataGrid>
+            <!-- 不使用 DataGrid：宿主没有加载 Avalonia.Controls.DataGrid 的主题，DataGrid 会渲染成空白。
+                 用 ItemsControl 画一张同样的表，任何主题下都能正常显示。 -->
+            <Border BorderThickness="1" BorderBrush="#33808080" CornerRadius="6" Height="260">
+                <ScrollViewer>
+                    <StackPanel>
+                        <Grid ColumnDefinitions="*,96,120" Margin="10,8,10,6">
+                            <TextBlock Text="课次" FontWeight="SemiBold" Opacity="0.8" />
+                            <TextBlock Grid.Column="1" Text="单独设置" FontWeight="SemiBold" Opacity="0.8"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="提前量（秒）" FontWeight="SemiBold" Opacity="0.8" />
+                        </Grid>
+                        <Border Height="1" Background="#33808080" />
+                        <ItemsControl x:Name="SlotList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnDefinitions="*,96,120" Margin="10,5">
+                                        <TextBlock Text="{Binding Display}" VerticalAlignment="Center"
+                                                   TextWrapping="Wrap" FontSize="13" />
+                                        <CheckBox Grid.Column="1" HorizontalAlignment="Center"
+                                                  IsChecked="{Binding UseOverride, Mode=TwoWay}" />
+                                        <TextBox Grid.Column="2" FontSize="13" Padding="6,3"
+                                                 Text="{Binding PrepText, Mode=TwoWay}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
 
             <Separator />
 

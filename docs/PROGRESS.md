@@ -150,3 +150,10 @@ tag 构建 run `44458193363` 11 步全绿，Release 自动发布。
 `artifacts/backup-1.0.0.1/`。构建 0 错误、单测 39/39、cipx 274 601 B（manifest 1.0.0.2）。
 
 **未完成**：本机安全策略拦截了 WMI 启动宿主，实机打开设置页这一步要用户手动启动后确认。
+
+**补一个稳健性修正**：每节课表格原来用 `Avalonia.Controls.DataGrid` 实现。插件无法保证宿主加载了
+DataGrid 的运行时主题（`avares://Avalonia.Controls.DataGrid/Themes/...`），一旦缺失，DataGrid 会渲染成空白框，
+用户看到的就是"表格没内容"。现在改成 `ItemsControl` + `Grid` 手绘表头与行，不依赖任何额外主题，
+勾选框与输入框仍双向绑定到 `BellSlotRow`，`应用每节课设置` 的语义不变（TextBox 默认按 PropertyChanged 回写，
+所以不再需要 `CommitEdit`）。值班表页仍保留原有 DataGrid（宿主自身的主界面就用 DataGrid 渲染课表，
+说明主题由宿主提供；若实测有问题再一起换）。

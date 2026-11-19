@@ -39,7 +39,7 @@ public partial class BellSettingsPage : SettingsPageBase
         _profileService = profileService;
         InitializeComponent();
         DataContext = this;
-        SlotGrid.ItemsSource = _slotRows;
+        SlotList.ItemsSource = _slotRows;
         LoadToUi();
         LoadSlotRows();
     }
@@ -129,10 +129,7 @@ public partial class BellSettingsPage : SettingsPageBase
     {
         try
         {
-            // 正在编辑的单元格可能还没把 TextBox 的值写回绑定对象，先提交一次。
-            SlotGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-            SlotGrid.CommitEdit(DataGridEditingUnit.Row, true);
-
+            // TextBox 默认按 PropertyChanged 回写，不依赖 DataGrid 的提交语义。
             if (_slotRows.Count == 0)
             {
                 StatusText.Text = "没有可应用的上课段。";
