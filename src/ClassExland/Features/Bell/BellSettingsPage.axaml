@@ -1,6 +1,7 @@
 <ci:SettingsPageBase xmlns="https://github.com/avaloniaui"
                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                      xmlns:ci="http://classisland.tech/schemas/xaml/core"
+                     xmlns:datagrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
                      x:Class="ClassExland.Features.Bell.BellSettingsPage">
     <ScrollViewer>
         <StackPanel Margin="16" Spacing="10">
@@ -38,6 +39,28 @@
             <TextBlock Text="音量（0-1）" />
             <TextBox x:Name="VolumeBox" Width="160" HorizontalAlignment="Left" />
             <Button x:Name="ButtonTestSound" Content="试听" Width="90" Click="ButtonTestSound_OnClick" />
+
+            <Separator />
+
+            <TextBlock Text="每节课提前量（单独调整）" FontWeight="SemiBold" />
+            <TextBlock Text="勾选「单独设置」的节次使用表格里的秒数；未勾选的节次使用上面的默认提前量。"
+                       Opacity="0.7" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ButtonReloadSlots" Content="从课表刷新" Width="110" Click="ButtonReloadSlots_OnClick" />
+                <Button x:Name="ButtonApplySlots" Content="应用每节课设置" Width="140" Click="ButtonApplySlots_OnClick" />
+            </StackPanel>
+            <datagrid:DataGrid x:Name="SlotGrid"
+                               AutoGenerateColumns="False"
+                               CanUserReorderColumns="False"
+                               CanUserResizeColumns="True"
+                               GridLinesVisibility="Horizontal"
+                               Height="260">
+                <datagrid:DataGrid.Columns>
+                    <datagrid:DataGridTextColumn Header="课次" Binding="{Binding Display}" Width="*" IsReadOnly="True" />
+                    <datagrid:DataGridCheckBoxColumn Header="单独设置" Binding="{Binding UseOverride}" Width="90" />
+                    <datagrid:DataGridTextColumn Header="提前量（秒）" Binding="{Binding PrepText}" Width="120" />
+                </datagrid:DataGrid.Columns>
+            </datagrid:DataGrid>
 
             <Separator />
 

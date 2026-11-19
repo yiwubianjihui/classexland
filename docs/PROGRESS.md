@@ -87,3 +87,60 @@ tag 构建 run `44458193363` 11 步全绿，Release 自动发布。
 由 SDK targets 的 `CipxPackageOutputDirectory` 决定，不是 `bin/Release/net8.0/`）。
 
 
+
+## 2026-11-19 晚 · 逐节课提前量 + 远程设置页（1.0.0.2）
+
+用户反馈两件事：① 需要给每节课单独调整预备铃时间；② 找不到 CLI 与远程的入口。
+
+排查结论：数据层与时间轴本来支持每节不同（`AttachedObjects[我方GUID]` 优先、`bell.json` 兜底），
+但**没有任何 UI 入口**；`bell list` 只读 `bell.json`，而首次安装时该文件是 `[]`，
+用户拿不到可用的 slot id。远程也只有 `remote.json` 手改，设置页里没有。
+
+实现：
+
+- `BellSlotCatalog`：把档案时间表按「表名 → 开始时间」展平成稳定序号，设置页与 CLI 共用，
+  保证界面上的"第 3 节"与 `cex bell set --index 3` 永远指同一节。
+- 预备铃设置页新增 DataGrid（课次 / 单独设置 / 提前量），保存时先提交正在编辑的单元格，
+  再批量写 `bell.json` → `ApplySlotPreps()` 写档案 → `InvalidateSchedule()` 重建当天时间轴。
+- `BellSettings.Reload()` + `BellProfileWriter.ApplySlotPreps()`：只写我方附加设置，不动宿主提醒开关
+  （原 `Apply()` 会顺手关宿主提醒，不适合"只改提前量"这条路径）。
+- CLI：`bell list` 改读课表（回退 bell.json）；`bell set` 支持 `--index`；写后热重载 + 同步档案。
+- 远程设置页：remote.json 的全部字段 + 检查/同步/停用；保存启用时清掉 `remote.disabled` 标记。
+- 远程快照写了 bell 配置后自动热重载（原来要重启才生效）。
+
+顺手修的两个真 bug：
+
+1. **HMAC 验签永远失败**：原实现对响应体全文算 HMAC，而 `signature` 字段本身就在响应体里
+   ⇒ 服务端无法构造出能通过的签名。改为去掉顶层 `signature` 后计算，并统一按大写比较。
+2. **`hostRunning` 恒为 false**：ClassIsland 2.x 的进程名是 `ClassIsland.Desktop`，
+   原判定只查 `ClassIsland` ⇒ CLI 的"宿主运行时拒绝离线写配置"保护实际失效。两个名字都查。
+
+验证：`dotnet build` 0 错误；单测 39/39。`cex` 发布为单文件（186 826 B）并装到
+`%LOCALAPPDATA%\ClassExland\bin\cex.exe`，实测 `--version` = 1.0.0.2、`status` 能连上运行中的桥。
+
+未完成：**插件 1.0.0.2 尚未装到实机**——宿主正开着"档案编辑"窗口，`ClassExland.dll` 被锁，
+复制会失败。manifest 已回退到 1.0.0.1 与实际 DLL 保持一版，待宿主退出后覆盖。
+
+## 2026-11-19 深夜 · 远程控制设置页重做（1.0.0.2 收尾）
+
+用户第二次反馈「给远程控制也制作设置界面，便于普通用户使用」——说明上一版设置页虽然有了，
+但仍是一张技术表单（清单路径 / HMAC / 超时 / 三项范围平铺），普通用户看不懂也用不上。
+
+重做后的 `RemoteSettingsPage`：
+
+- **状态卡在最上面**：未启用 / 已停用 / 配置不完整 / 已启用，加一行"上次成功同步的时间与版本"
+  （从 `remote-state.json` 读 `AppliedAt`，为此给 `RemoteStateStore` 加了 `LoadAppliedAt()`）。
+- **主界面只留两个输入框**：服务器地址、访问令牌；按钮三个：保存并测试 / 立即同步 / 停用。
+- **错误中文化**：把同步服务返回的 JSON 摘要解析成一句话，401/403、404、超时、DNS、证书、
+  连接被拒分别给出可执行的中文提示，不再把英文异常直接甩给用户。
+- **高级选项折叠**：清单路径、签名密钥、超时；再加配置/日志路径与「打开配置文件夹 / 复制诊断信息」。
+  诊断信息里令牌只显示"已填（N 字符）"，不泄露明文。
+- **本机网页控制台一键开关**：直接调 `LoopbackWebHost.StartAsync()`（与 `cex web start` 同一条路径），
+  启动后显示带令牌的地址，可「打开」或「复制链接」。仅监听 127.0.0.1。
+- 预览清单地址随输入实时更新，普通用户不用理解"相对路径"。
+
+**部署**：宿主已退出，`ClassExland.dll` / `.pdb` / `manifest.yml` 已覆盖到实机插件目录，
+构建产物与实机 DLL 的 MD5 一致（`26F0FD6D860EEF795976E4839671E2B3`）；旧版备份在
+`artifacts/backup-1.0.0.1/`。构建 0 错误、单测 39/39、cipx 271 523 B（manifest 1.0.0.2）。
+
+**未完成**：本机安全策略拦截了 WMI 启动宿主，实机打开设置页这一步要用户手动启动后确认。

@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ClassExland.Contracts;
 using Microsoft.Extensions.Hosting;
 
@@ -20,6 +21,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
     private readonly SafeConfigWriter _writer;
     private readonly CoreConfigWriter _coreWriter;
     private readonly ICommandDispatcher? _dispatcher;
+    private readonly IServiceProvider _services;
     private readonly IPluginPaths _paths;
 
     private CancellationTokenSource? _lifetime;
@@ -44,6 +46,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         _writer = writer;
         _coreWriter = coreWriter;
         _paths = paths;
+        _services = serviceProvider;
         // 命令层可能稍后由 AddCommandBridge 注册，这里用 IServiceProvider 安全解析，缺失也不抛。
         _dispatcher = serviceProvider.GetService(typeof(ICommandDispatcher)) as ICommandDispatcher;
     }
@@ -232,14 +235,15 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             report.Version = manifest.Version;
             report.ETag = manifest.ETag;
 
-            // 2) 可选 HMAC-SHA256 签名校验
+            // 2) 可选 HMAC-SHA256 签名校验（对"去掉 signature 字段后的清单原文"计算，
+            //    否则签名必须包含自己，永远对不上）
             if (!string.IsNullOrEmpty(cfg.HmacSecret))
             {
-                var expected = ComputeHmac(raw, cfg.HmacSecret);
+                var expected = ComputeHmac(StripSignature(raw), cfg.HmacSecret);
                 if (string.IsNullOrEmpty(manifest.Signature) ||
                     !CryptographicOperations.FixedTimeEquals(
                         Encoding.UTF8.GetBytes(expected),
-                        Encoding.UTF8.GetBytes(manifest.Signature)))
+                        Encoding.UTF8.GetBytes(manifest.Signature.ToUpperInvariant())))
                 {
                     report.Add("HMAC 签名校验失败，拒绝应用");
                     _audit.Log("hmac-fail", $"version={manifest.Version}", ok: false);
@@ -303,6 +307,10 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                     foreach (var f in core.RolledBackFiles) report.RolledBack.Add(f);
                     if (!core.Ok) throw new InvalidOperationException(core.Message);
                 }
+
+                // 快照是直接写文件的，运行时内存里仍是旧值；预备铃必须在这里热生效，
+                // 否则远程下发了每节课提前量也要等下次重启才看得到。
+                RefreshBellRuntime(applied);
             }
 
             // 7) 指令队列（经 ICommandDispatcher，与 CLI 共用命令层）
@@ -394,10 +402,10 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
 
             if (!string.IsNullOrEmpty(cfg.HmacSecret))
             {
-                var expected = ComputeHmac(raw, cfg.HmacSecret);
+                var expected = ComputeHmac(StripSignature(raw), cfg.HmacSecret);
                 if (string.IsNullOrEmpty(manifest.Signature) ||
                     !CryptographicOperations.FixedTimeEquals(
-                        Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(manifest.Signature)))
+                        Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(manifest.Signature.ToUpperInvariant())))
                 {
                     report.Add("HMAC 签名校验失败");
                     _audit.Log("poll-hmac-fail", manifest.Version, ok: false);
@@ -456,10 +464,55 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         }
     }
 
+    /// <summary>
+    /// 快照写完后让预备铃模块重新读配置：重载内存 → 把每节课的值同步进档案附加设置 → 时间轴重算。
+    /// 只在确实写了 bell.json / bell-options.json 时执行，其他快照不打扰时间轴。
+    /// </summary>
+    private void RefreshBellRuntime(IReadOnlyList<ApplyFileResult> applied)
+    {
+        try
+        {
+            var touched = applied.Any(a =>
+                a.Ok && (a.Path.EndsWith(ConfigFiles.Bell, StringComparison.OrdinalIgnoreCase) ||
+                         a.Path.EndsWith("bell-options.json", StringComparison.OrdinalIgnoreCase)));
+            if (!touched) return;
+
+            var settings = _services.GetService(typeof(Features.Bell.BellSettings)) as Features.Bell.BellSettings;
+            settings?.Reload();
+            var writer = _services.GetService(typeof(Features.Bell.BellProfileWriter)) as Features.Bell.BellProfileWriter;
+            writer?.ApplySlotPreps();
+            var timeline = _services.GetService(typeof(Features.Bell.BellTimelineService)) as Features.Bell.BellTimelineService;
+            timeline?.InvalidateSchedule();
+            _audit.Log("bell-refresh", "远程快照已写入，预备铃配置已热重载", ok: true);
+        }
+        catch (Exception ex)
+        {
+            _audit.Log("bell-refresh-fail", ex.Message, ok: false);
+        }
+    }
+
     private static string ComputeHmac(string rawBody, string secret)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody)));
+    }
+
+    /// <summary>
+    /// 去掉顶层 signature 字段后的紧凑 JSON。签名必须能由服务端在"不含 signature"时算出，
+    /// 否则对整包求 HMAC 会因签名包含自身而永远不成立。
+    /// </summary>
+    private static string StripSignature(string raw)
+    {
+        try
+        {
+            if (JsonNode.Parse(raw) is not JsonObject obj) return raw;
+            obj.Remove("signature");
+            return obj.ToJsonString();
+        }
+        catch
+        {
+            return raw;
+        }
     }
 
     private static bool IsSafePluginConfigName(string fileName)

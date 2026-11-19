@@ -20,7 +20,8 @@ internal static class Program
         }
         if (parsed.ShowVersion)
         {
-            Console.Out.WriteLine("cex 1.0.0.0 (ClassExland CLI)");
+            var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0.0";
+            Console.Out.WriteLine($"cex {version} (ClassExland CLI)");
             return CliExit.Ok;
         }
         if (!string.IsNullOrWhiteSpace(parsed.Error))

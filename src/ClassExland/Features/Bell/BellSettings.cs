@@ -216,6 +216,68 @@ public sealed partial class BellSettings : ObservableRecipient
     /// <summary>某时间片是否存在显式覆盖配置。</summary>
     public bool HasPrepOverride(string slotId) => _slots.Any(s => s.Id == slotId);
 
+    /// <summary>
+    /// 批量写入每节课提前量。value 为 null 表示删除该节的覆盖、回退到默认值。
+    /// 只落盘一次，供设置页"应用每节课设置"与 CLI 使用。
+    /// </summary>
+    public void ApplyPreps(IReadOnlyDictionary<string, int?> preps, IReadOnlyDictionary<string, string?>? labels = null)
+    {
+        foreach (var (slotId, prep) in preps)
+        {
+            if (prep is null)
+            {
+                _slots.RemoveAll(s => s.Id == slotId);
+                continue;
+            }
+
+            var slot = _slots.FirstOrDefault(s => s.Id == slotId);
+            if (slot is null)
+            {
+                slot = new BellSlotConfig { Id = slotId };
+                _slots.Add(slot);
+            }
+            slot.PrepSeconds = Math.Clamp(prep.Value, 0, 600);
+            slot.Enabled = true;
+            if (labels is not null && labels.TryGetValue(slotId, out var label) && !string.IsNullOrWhiteSpace(label))
+                slot.Slot = label;
+        }
+        Save();
+    }
+
+    /// <summary>
+    /// 从磁盘重新读取。CLI 或远程同步直接改了 bell.json / bell-options.json 后必须调用，
+    /// 否则内存里仍是启动时的快照，界面上看不到变化、时间轴也按旧值走。
+    /// </summary>
+    public void Reload()
+    {
+        ResetToDefaults();
+        try
+        {
+            LoadSlots();
+            LoadOptions();
+        }
+        catch
+        {
+            // 配置损坏时保留默认值，不让插件因配置问题崩溃。
+        }
+        OnPropertyChanged(string.Empty);
+    }
+
+    private void ResetToDefaults()
+    {
+        _slots = new List<BellSlotConfig>();
+        _enableBell = true;
+        _defaultPrepSeconds = 120;
+        _classEndDelaySeconds = 60;
+        _preNoticeLeadSeconds = 60;
+        _preNoticeOverflow = PreNoticeOverflowPolicy.ClipToMidpoint;
+        _makeupWindowSeconds = 1800;
+        _enableHostStateOverride = true;
+        _enableBellSound = true;
+        _bellSoundPath = "";
+        _bellVolume = 0.8f;
+    }
+
     /// <summary>供计算使用的选项快照（纯逻辑层不依赖本类）。</summary>
     public BellTimelineOptions ToOptions() => new()
     {

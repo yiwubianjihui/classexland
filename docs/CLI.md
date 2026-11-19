@@ -47,7 +47,7 @@
 |---|---|
 | `cex status` | 当前虚拟/宿主状态、下一节课、剩余秒数、值日概况 |
 | `cex version` | 插件与 CLI 版本信息 |
-| `cex bell list` | 列出各节课的预备铃提前量 |
+| `cex bell list` | 按课表列出全部上课段：`index`、`id`、起止时间、有效提前量、是否单独覆盖 |
 | `cex bell preview` | 预览预备铃/下课时间轴，不修改 |
 | `cex duty show` | 查看当前时段/指定日期值日名单 |
 | `cex activity list` | 列出特殊活动及提前提醒设置 |
@@ -64,7 +64,7 @@
 
 | 命令 | 说明 | 高危 |
 |---|---|---|
-| `cex bell set` | 设置某节课预备铃提前量 | |
+| `cex bell set` | 设置某节课预备铃提前量（`--index <n>` 或 `--slot <id>` + `--prep <秒>`） | |
 | `cex bell import` | 导入铃声配置 | |
 | `cex bell export` | 导出铃声配置 | |
 | `cex duty edit` | 编辑值日表条目 | |
@@ -159,10 +159,15 @@ cex web status                   # Web 管理页状态
 ### 改某节课的预备铃提前量
 
 ```bash
-cex bell list                                          # 先拿到 slot id
-cex bell set --slot <id> --prep 120                    # 默认 dry-run，预览差异
-cex bell set --slot <id> --prep 120 --yes              # 实际写入（自动备份 + 审计）
+cex bell list                                          # 按课表列出每节课，记下 index
+cex bell set --index 3 --prep 90                       # 默认 dry-run，预览差异
+cex bell set --index 3 --prep 90 --yes                 # 实际写入（自动备份 + 审计）
+cex bell set --index 3 --prep 120 --yes                # 仍写 120 即回到"默认值"
+cex bell set --slot "<bell list 里的 id>" --prep 90 --yes   # 课表调整过、序号变了时用 id 更稳
 ```
+
+- `--prep` 取值 0–600 秒；写入后会**立即生效**：重载内存配置 → 把每节课的值同步进档案附加设置 → 重建当天时间轴，无需重启 ClassIsland。
+- 不写 `--yes` 时只预览；`--json` 可拿到 `appliedToProfile` 与备份路径，便于脚本判断。
 
 ### 导入旧插件值日表 / 执行迁移
 

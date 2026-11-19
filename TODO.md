@@ -19,8 +19,12 @@
 | 12 | CI/CD 与发版 | ✅ | docs-dev | `.github/workflows/build.yml` |
 | 13 | 集成构建与验收 | ✅ | team-lead | `docs/ACCEPTANCE.md`、`tests/ClassExland.Tests/`（0 错 / 39 测试全绿） |
 | 14 | 推送到 `yiwubianjihui/classexland` | ✅ | team-lead | `main` 111 文件 / 13641 行，origin 已跟踪 |
-| 15 | 实机验收（装到 ClassIsland 2.1.0.1 跑 C 节清单） | ⬜ | — | `docs/ACCEPTANCE.md` C 节 |
+| 15 | 实机验收（装到 ClassIsland 2.1.0.1 跑 C 节清单） | ✅ | team-lead | `docs/ACCEPTANCE.md` C 节（1.0.0.1，抓到并修复 3 个运行时缺陷） |
 | 16 | 打 tag + Release 资产（cipx + SHA256SUMS） | ✅ | team-lead | `v1.0.0.0` → run `44458193363`，资产已发布并核验 SHA256 |
+| 17 | 逐节课预备铃提前量（设置页表格 / CLI `--index` / 远程热生效） | ✅ | team-lead | `Features/Bell/BellSlotCatalog.cs`、`BellSettingsPage.axaml`、`Bridge/CommandDispatcher.Bell.cs`、`Remote/RemoteSettingsPage.axaml` |
+| 18 | 部署 1.0.0.2 到实机 | ✅ | team-lead | `data/Plugins/yibianhui.classexland/` 已覆盖（DLL MD5 `26F0FD6D…` 与构建产物一致，manifest 1.0.0.2） |
+| 19 | 远程控制设置页（面向普通用户） | ✅ | team-lead | `Remote/RemoteSettingsPage.axaml(.cs)`：状态卡、保存并测试、错误中文化、高级折叠、本机网页控制台、诊断复制 |
+| 20 | 实机打开设置页验收 | 🔄 | 用户 + team-lead | 启动 ClassIsland → 设置 → 「ClassExland 远程控制」，确认页面正常渲染、状态卡与按钮可用 |
 
 ## 构建收敛记录（Release / net8.0）
 

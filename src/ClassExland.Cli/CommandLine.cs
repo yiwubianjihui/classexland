@@ -204,7 +204,10 @@ internal static class CommandLine
 
         命令:
           status                       当前状态 / 下一节课 / 剩余秒数 / 值日概况
-          bell list|set|import|export|preview
+          bell list                    按课表列出每节课的序号、有效提前量与是否覆盖
+          bell set --index 3 --prep 90 逐节设置（默认 dry-run，加 --yes 落盘并立即生效）
+          bell set --slot <id> --prep 90  用 bell list 输出的 id 精确指定
+          bell import|export|preview
           duty show|edit|import|export|rotate|complete
           activity list|add|edit|test
           layout switch|current

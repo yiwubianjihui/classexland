@@ -30,11 +30,11 @@ ClassIsland 插件：**贴着现有课表长出来的"上课自动化"整合包*
 ## 首次配置
 
 1. 打开 ClassExland 设置页，先执行**宿主提醒一键配置**：预览将要修改的时间线条目，确认后再写入；这会把宿主自带的"上课前/上课提醒"关闭，避免与预备铃双重响铃。可随时一键回滚。
-2. 在"预备铃"页为每节课设置提前量（默认 120 秒），如需调整上课/下课状态覆盖与下课延迟（默认 60 秒）一并进行。
+2. 在"预备铃"页设置默认提前量（默认 120 秒）；需要**逐节课不同**时，用下方「每节课提前量」表格勾选「单独设置」并填秒数，点「应用每节课设置」立即生效（不必重启）。上课/下课状态覆盖与下课延迟（默认 60 秒）也在本页。
 3. 在"值日表"页直接录入，或走"导入导出"页从旧插件导入（见 [MIGRATION.md](docs/MIGRATION.md)）。
 4. 在"特殊活动"页确认活动与提前提醒（默认提前 10 分钟并附带值日名单）。
 5. 在"界面切换"页确认布局名（默认 `Default` / `offclass`）与缩放、透明度。
-6. （可选）在"远程同步"页填入**你自己托管的**服务器地址并启用；不启用则完全离线工作。
+6. （可选）在设置 →「ClassExland 远程控制」里填入**你自己托管的**服务器地址与令牌，点「保存并测试」即可；不启用则完全离线工作。
 
 配置项字段与示例 JSON 见 [CONFIGURATION.md](docs/CONFIGURATION.md)。改配置后可用 `cex config doctor` 体检。
 
@@ -68,9 +68,9 @@ ClassExland 定位为 **DutyList / DutyRoster / 试写作业插件的整合替�
 ```bash
 cex status                       # 查看当前状态、下一节课、值日概况
 cex version                      # 版本信息
-cex bell list                    # 列出各节课预备铃提前量
-cex bell set --slot <id> --prep 120             # 默认 dry-run，预览
-cex bell set --slot <id> --prep 120 --yes       # 实际写入（自动备份 + 审计）
+cex bell list                    # 按课表列出每节课的 index / id / 有效提前量
+cex bell set --index 3 --prep 90            # 默认 dry-run，预览
+cex bell set --index 3 --prep 90 --yes      # 实际写入（自动备份 + 审计，立即生效）
 cex duty show --date 2026-11-19
 cex config doctor                # 配置一致性体检
 cex profile list                 # 列出本机档案

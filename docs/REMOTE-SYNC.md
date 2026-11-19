@@ -2,6 +2,17 @@
 
 远程同步是 ClassExland 的**可选、高风险能力**，默认关闭。它采用"**快照（snapshot）+ 指令队列（command queue）**"两种形态：快照用于日常配置同步，指令用于临时操控，指令与 CLI 共用同一命令层（`ICommandDispatcher`）。
 
+## 在设置页里配置（推荐）
+
+设置 → **ClassExland 远程控制**：
+
+1. 填「服务器地址」（必须 `https://` 开头）与管理员提供的「访问令牌」；
+2. 点「保存并测试」——只发一次 GET 读回清单并验签，**不应用任何配置**；
+3. 确认提示"连接成功"后，再点「立即同步」应用；
+4. 只想在这台电脑上操作，可勾选「启用本机网页控制台」，点「打开」直接在浏览器里用（仅监听 `127.0.0.1`）。
+
+清单路径、签名密钥、超时都在同一页的「高级选项」里，日常不需要改。手动编辑 `remote.json` 仍然有效，字段见下文。
+
 ## 安全约定（必须遵守）
 
 - **地址不写进代码**：服务器地址只写在外部配置 `remote.json` 的 `ServerUrl`（或环境变量），插件二进制中不含任何服务器地址。
@@ -16,110 +27,102 @@
 
 ## 服务端部署约定
 
-服务端只需提供两个只读/可写端点（路径可自定，写进客户端配置即可；下例为约定默认值）：
+服务端只需提供一个静态 JSON（路径写进 `remote.json` 的 `ManifestPath`，默认 `/config/manifest.json`）：
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/snapshot.json` | GET | 返回当前配置快照；支持 `If-None-Match` / `ETag` 条件请求 |
-| `/commands.json` | GET | 返回待执行指令队列；支持游标 `cursor` 与 `ETag` |
-| `/commands/ack` | POST | 客户端回传已执行指令的游标与执行结果 |
+| `/config/manifest.json` | GET | 返回当前清单（快照 + 指令队列）；建议支持 `ETag` |
 
-- 版本：每条快照有单调递增的 `version` 与唯一 `etag`；客户端仅当 `etag` 变化时才应用。
-- 指令：每条指令有唯一 `id`、递增 `cursor` 与独立签名；客户端按 `cursor` 顺序执行，执行后 ack；重复 id 必须幂等。
-- 所有响应体都带签名；客户端在应用前**先验签，再校验 etag/版本，最后才写入**。
+- 客户端用 `Bearer` 令牌鉴权，可选 HMAC-SHA256 验签；**不支持写入回调 / ack**，服务端无需保存客户端状态。
+- 版本：清单里放一个单调递增的 `version` 与唯一 `etag`；两者都没变则客户端直接跳过。
+- 远程下发的指令只在本机执行，执行结果写本机 `audit.log`，不回传服务器。
 
-## 快照 JSON 格式
+## 清单 JSON 格式（实际实现）
+
+客户端只发一个 `GET`：`ServerUrl + ManifestPath`。快照与指令都在**同一份清单**里，不需要额外的 `/commands.json` 端点。
 
 ```json
 {
-  "schema": 1,
-  "version": 7,
+  "version": "7",
   "etag": "v7-9f2c1a",
-  "generatedAt": "2026-11-19T08:00:00Z",
-  "payload": {
-    "pluginConfig": {
-      "bell": { "...": "见 CONFIGURATION.md" },
-      "duty": { "...": "..." },
-      "activities": { "...": "..." },
-      "layout": { "...": "..." }
+  "snapshot": {
+    "pluginConfigs": {
+      "bell.json": [ { "id": "<slotKey>", "prepSeconds": 90, "enabled": true } ],
+      "bell-options.json": { "DefaultPrepSeconds": 120, "EnableBell": true },
+      "duty.json": { "...": "见 CONFIGURATION.md" }
     },
-    "classislandProfile": { "...": "仅当 Scope 开启时包含" },
-    "classislandGlobal": { "...": "仅当 Scope 开启时包含" }
+    "core": {
+      "settingsJson": { "...": "仅 EnableCoreConfigSync=true 时应用" },
+      "settingsBaseHash": "",
+      "profiles": {
+        "YBH.json": { "json": { "...": "..." }, "baseHash": "" }
+      }
+    }
   },
-  "signature": "base64url(hmac_sha256(secret, canonical({schema,version,etag,generatedAt,payload})))"
+  "commands": [
+    { "command": "bell.set", "args": { "index": "3", "prep": "90" }, "apply": true, "dryRun": false }
+  ],
+  "signature": "<响应原文的 HMAC-SHA256 十六进制串>"
 }
 ```
 
-签名输入为规范化 JSON（`sort_keys=True`、无多余空白、UTF-8）的字节；`signature` 字段本身不参与签名。
+- `pluginConfigs` 的键必须是**单层文件名 + `.json`**，且不能是 `remote.json` / `remote-state.json`（防止被远程改向或关闭）；其他非法名整条拒绝。
+- `version` + `etag` 都相同 ⇒ 跳过，不重复应用。
+- `signature`：配置了 `HmacSecret` 时必填，值是对**响应体原文**做 `HMAC-SHA256` 的十六进制串（不是对某个子集重算）。
+- 写入顺序：整份备份 → 逐个插件配置（备份 + JSON 校验 + 原子替换）→ 核心配置（可选）→ 指令队列。
+- 写了 `bell.json` / `bell-options.json` 后会自动热重载并同步档案，逐节提前量立即生效。
+- 任一环节失败 ⇒ 回滚本批已写入的插件配置，保留本地原文件。
 
-## 指令队列 JSON 格式
+## 指令项格式
 
 ```json
 {
-  "schema": 1,
-  "cursor": 41,
-  "etag": "c41-77ab90",
-  "items": [
-    {
-      "id": "cmd-42",
-      "cursor": 42,
-      "issuedAt": "2026-11-19T08:05:00Z",
-      "command": "layout.switch",
-      "args": { "to": "class" },
-      "apply": true,
-      "signature": "base64url(hmac_sha256(secret, canonical(id,cursor,issuedAt,command,args,apply)))"
-    }
-  ]
+  "command": "bell.set",
+  "args": { "index": "3", "prep": "90" },
+  "apply": true,
+  "dryRun": false
 }
 ```
 
-- `command` 与 CLI 命令一一对应（见 [CLI.md](CLI.md)）；`apply: true` 表示这是写操作，需令牌 + 验签通过，并按 CLI 的安全模型记审计。
-- 客户端 ack 示例：
+- `command` 用点分名（`bell.set` / `layout.switch` / `class.set`…），与 CLI 共用同一命令层，参数名也一致（见 [CLI.md](CLI.md)）。
+- `apply: true` 才会真正落盘；高危命令仍然要求 `args.confirm = "yes"`，与 CLI 的安全模型完全相同。
+- 远程来源的每次执行都会写进 `audit.log`（`source=remote`）。
 
-```json
-{ "cursor": 42, "results": [ { "id": "cmd-42", "ok": true, "message": "ok" } ], "signature": "..." }
-```
+## 服务端生成清单的最小示例（Python）
 
-## 最小客户端示例（Python 伪例）
-
-仅演示格式与校验流程，**不含任何真实服务器地址或密钥**；实际实现由远程同步模块完成。
+演示"如何签出客户端认得的格式"，不含任何真实地址或密钥。
 
 ```python
-import os, json, hmac, hashlib, base64, urllib.request
+import hashlib, hmac, json, pathlib
 
-BASE = os.environ["CLEX_SERVER_URL"]        # 用户自托管，必须为 https://
-TOKEN = os.environ["CLEX_REMOTE_TOKEN"]
-SECRET = os.environ["CLEX_HMAC_SECRET"].encode()
+SECRET = b"<与 remote.json 的 HmacSecret 一致>"
 
-def canonical(obj: dict) -> bytes:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False).encode("utf-8")
+manifest = {
+    "version": "2026-11-19-1",
+    "etag": "v1",
+    "snapshot": {
+        "pluginConfigs": {
+            # 逐节课改预备铃：整份数组，id 用 cex bell list 输出的 id
+            "bell.json": [
+                {"id": "<slotKey>", "prepSeconds": 90, "enabled": True},
+            ],
+        }
+    },
+    "commands": [],
+}
 
-def sign(obj: dict) -> str:
-    return base64.urlsafe_b64encode(
-        hmac.new(SECRET, canonical(obj), hashlib.sha256).digest()
-    ).decode().rstrip("=")
+# 客户端会先去掉 signature 字段再算 HMAC，所以这里用紧凑 JSON（无缩进）签名
+payload = json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
+manifest["signature"] = hmac.new(SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
-def get_json(path: str, headers: dict) -> dict:
-    assert BASE.startswith("https://"), "仅允许 HTTPS"
-    req = urllib.request.Request(BASE + path, headers={
-        "Authorization": f"Bearer {TOKEN}", **headers})
-    with urllib.request.urlopen(req, timeout=10) as resp:   # 证书校验默认开启
-        return json.load(resp), resp.headers
-
-def fetch_snapshot(current_etag=None):
-    headers = {"If-None-Match": current_etag} if current_etag else {}
-    data, resp_headers = get_json("/snapshot.json", headers)
-    if resp_headers.get("ETag") == current_etag:
-        return None                                        # 无变化，直接用本地配置
-    signed_fields = {k: data[k]
-                     for k in ("schema", "version", "etag", "generatedAt", "payload")}
-    assert hmac.compare_digest(sign(signed_fields), data["signature"]), "签名校验失败"
-    assert data["etag"] == resp_headers.get("ETag"), "etag 不一致"
-    return data                                            # 校验通过后才进入备份→写入流程
+pathlib.Path("manifest.json").write_text(
+    json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 ```
 
-写入流程（伪代码）：`backup_local()` → `verify_signature()` → `check_etag_version()` → `atomic_write()`；任一步失败则 `rollback()` 并写审计日志。
+注意两点：
+
+- 签名是 **十六进制**，不是 base64；对 `separators=(",", ":")` 的紧凑 JSON 计算。
+- 客户端比较字符串时忽略大小写差异（`Convert.ToHexString` 输出大写），服务端用小写也能通过。
 
 ## 出问题怎么办
 

@@ -110,7 +110,9 @@ public sealed class FileStore
     {
         try
         {
-            return System.Diagnostics.Process.GetProcessesByName("ClassIsland").Length > 0;
+            // 2.x 桌面版的可执行文件叫 ClassIsland.Desktop，旧版/开发构建是 ClassIsland。
+            return System.Diagnostics.Process.GetProcessesByName("ClassIsland").Length > 0
+                   || System.Diagnostics.Process.GetProcessesByName("ClassIsland.Desktop").Length > 0;
         }
         catch
         {

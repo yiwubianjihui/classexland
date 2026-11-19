@@ -12,3 +12,6 @@ build*.log
 
 # 本地运行产物
 data/
+
+# 本地发布产物（cex 单文件、旧版备份等）
+artifacts/

@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClassExland.Contracts;
+using ClassExland.Features.Bell;
 
 namespace ClassExland.Features.Bridge;
 
@@ -16,12 +17,38 @@ public sealed partial class CommandDispatcher
     private Task<CommandResult> BuildBellSetPreview(CommandRequest r, bool apply)
     {
         var slot = GetArg(r, "slot") ?? GetArg(r, "id");
-        if (string.IsNullOrWhiteSpace(slot)) return Task.FromResult(Fail(ExitCodes.Validation, "缺少 --slot <id>"));
+        var indexText = GetArg(r, "index");
+        BellSlotInfo? target = null;
+
+        // --index N：按 cex bell list 的序号定位，省去手打 "档案ID|开始|结束" 这种长键。
+        if (!string.IsNullOrWhiteSpace(indexText))
+        {
+            if (!int.TryParse(indexText, out var index) || index < 1)
+                return Task.FromResult(Fail(ExitCodes.Validation, "--index 必须是 ≥1 的整数（见 bell list 的 index 列）"));
+
+            target = EnumerateBellSlots().FirstOrDefault(s => s.Index == index);
+            if (target is null)
+                return Task.FromResult(Fail(ExitCodes.Validation,
+                    $"没有第 {index} 节课；先运行 cex bell list 查看可用序号"));
+
+            slot = target.SlotKey;
+        }
+
+        if (string.IsNullOrWhiteSpace(slot)) return Task.FromResult(Fail(ExitCodes.Validation, "缺少 --slot <id> 或 --index <n>"));
         if (!int.TryParse(GetArg(r, "prep"), out var prep) || prep is < 0 or > 600)
             return Task.FromResult(Fail(ExitCodes.Validation, "--prep 必须是 0–600 的整数"));
 
+        var label = target?.Display;
+
         if (!apply)
-            return Task.FromResult(Preview(new { file = ConfigFiles.Bell, slot, prepSeconds = prep, action = "set" }));
+            return Task.FromResult(Preview(new
+            {
+                file = ConfigFiles.Bell,
+                slot,
+                slotLabel = label,
+                prepSeconds = prep,
+                action = "set"
+            }));
 
         try
         {
@@ -34,14 +61,24 @@ public sealed partial class CommandDispatcher
                 {
                     // 真值字段为 prepSeconds（bell-dev 对齐），不写 prep 别名
                     obj["prepSeconds"] = prep;
+                    if (label is not null) obj["slot"] = label;
                     found = true;
                 }
             }
             if (!found)
-                array.Add(new JsonObject { ["id"] = slot, ["prepSeconds"] = prep, ["enabled"] = true });
+                array.Add(new JsonObject { ["id"] = slot, ["prepSeconds"] = prep, ["enabled"] = true, ["slot"] = label });
 
             _store.Write(ConfigFiles.Bell, bellRoot);
-            return Task.FromResult(Ok(new { slot, prepSeconds = prep, created = !found, backup }));
+            var appliedToProfile = RefreshBellAfterWrite();
+            return Task.FromResult(Ok(new
+            {
+                slot,
+                slotLabel = label,
+                prepSeconds = prep,
+                created = !found,
+                appliedToProfile,
+                backup
+            }));
         }
         catch (CommandAbortedException ex)
         {
@@ -67,7 +104,8 @@ public sealed partial class CommandDispatcher
             var (bellRoot, target) = LoadRootAndArray(_store.ReadRaw(ConfigFiles.Bell), "items", "slots", "bells");
             foreach (var item in incoming) target.Add(item?.DeepClone());
             _store.Write(ConfigFiles.Bell, bellRoot);
-            return Task.FromResult(Ok(new { imported = incoming.Count, backup }));
+            var appliedToProfile = RefreshBellAfterWrite();
+            return Task.FromResult(Ok(new { imported = incoming.Count, appliedToProfile, backup }));
         }
         catch (JsonException ex)
         {
@@ -306,7 +344,8 @@ public sealed partial class CommandDispatcher
             var root = JsonNode.Parse(raw) ?? new JsonObject();
             SetJsonPath(root, path, value);
             _store.Write(file, root);
-            return Task.FromResult(Ok(new { file, path, value, backup }));
+            var bellRefreshed = IsBellConfigFile(file) && RefreshBellAfterWrite();
+            return Task.FromResult(Ok(new { file, path, value, bellRefreshed, backup }));
         }
         catch (CommandAbortedException ex) { return Task.FromResult(Fail(ex.ExitCode, ex.Message)); }
         catch (JsonException ex) { return Task.FromResult(Fail(ExitCodes.Validation, "JSON 无效：" + ex.Message)); }

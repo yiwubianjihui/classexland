@@ -11,7 +11,8 @@
 
 | 文件 | 用途 |
 |---|---|
-| `bell.json` | 预备铃、状态覆盖、下课延迟 |
+| `bell.json` | 每节课的预备铃提前量（根为数组，CLI 直接读写） |
+| `bell-options.json` | 预备铃全局选项（默认提前量、下课延迟、预告、铃声、Harmony 开关） |
 | `duty.json` | 值日表、组件显示、提醒与 TTS |
 | `activities.json` | 特殊活动（根数组） |
 | `activity-options.json` | 活动提前提醒的全局选项（提前开关与分钟数） |
@@ -24,33 +25,56 @@
 
 ---
 
-## 1. `bell.json` — 预备铃与课堂状态
+## 1. `bell.json` + `bell-options.json` — 预备铃与课堂状态
 
-每节课的提前量最终会写入课表 `TimeLayouts[i].Layouts[i].AttachedObjects[我方GUID]`（跟随档案与课表，不影响其他档案）。`prepOverrides` 是本插件的兜底覆盖表（每条用 `id` / `prepSeconds` / `enabled` 描述）；未列出的节次使用 `defaultPrepSeconds`。所有字段名以 camelCase 为准。
+配置拆成两个文件，避免 CLI 读写每节课时被全局选项污染：
+
+- **`bell.json`**：根为 **JSON 数组**，一项对应一节课，真值字段是 `prepSeconds`。`cex bell list/set` 直接读写它。
+- **`bell-options.json`**：全局参数（对象），字段名 PascalCase。
+
+每节课的提前量最终会写入课表 `TimeLayouts[i].Layouts[i].AttachedObjects[我方GUID]`（跟随档案与课表，不影响其他档案）；`bell.json` 是兜底副本，档案读取失败时仍可用。**档案里的值优先于 bell.json**，所以 CLI / 远程改完必须同步档案——本插件已自动处理（见下）。
+
+### bell.json（每节课）
+
+```jsonc
+[
+  {
+    "id": "<slotKey>",        // 稳定键：档案ID|开始HH:mm:ss|结束HH:mm:ss
+    "prepSeconds": 120,       // 该节提前量（0–600 秒）
+    "enabled": true,
+    "slot": "周一课表 · 第 3 节 09:40-10:20",  // 可读标签，仅用于展示
+    "subject": "数学"          // 可选
+  }
+]
+```
+
+数组里没有的节次使用 `defaultPrepSeconds`。
+
+### bell-options.json（全局）
 
 ```jsonc
 {
-  "enableBell": true,
-  "enableHostStateOverride": true,   // Harmony 全局覆盖：让宿主在预备铃时即进入 OnClass；默认启用，可一键关闭
-  "defaultPrepSeconds": 120,         // 每节课默认预备铃提前量（秒）
-  "preNoticeLeadSeconds": 60,        // 预告提醒：在预备铃前 N 秒响（原"上课前 60 秒提醒"平移到这里）
-  "classEndDelaySeconds": 60,        // 下课延迟 D（秒），范围 0–300
-  "preNoticeOverflow": "ClipToMidpoint", // 预告溢出前一课间：ClipToMidpoint | Skip | Keep
-  "makeupWindowSeconds": 1800,       // 启动晚于某个时点时的补发窗口（默认 30 分钟）
-  "enableBellSound": true,
-  "bellSoundPath": "",               // 铃声文件路径；空表示不播放
-  "bellVolume": 0.8,                 // 0.0–1.0
-  "prepOverrides": [
-    {
-      "id": "<slotKey>",             // 槽位稳定键（由课表条目推导）
-      "prepSeconds": 120,
-      "enabled": true
-    }
-  ]
+  "EnableBell": true,
+  "DefaultPrepSeconds": 120,          // 默认提前量（秒）
+  "ClassEndDelaySeconds": 60,         // 下课延迟 D（秒），0–300
+  "PreNoticeLeadSeconds": 60,         // 预告提醒：预备铃前 N 秒（原"上课前 60 秒提醒"平移到此处）
+  "PreNoticeOverflow": 0,             // 0=裁剪到课间中点 | 1=跳过预告 | 2=保持原时间
+  "MakeupWindowSeconds": 1800,        // 启动补发窗口（秒）
+  "EnableHostStateOverride": true,    // Harmony 全局覆盖：预备铃时即进入 OnClass
+  "EnableBellSound": true,
+  "BellSoundPath": "",                // 铃声文件路径；空表示不播放
+  "BellVolume": 0.8                   // 0.0–1.0
 }
 ```
 
-> 宿主自带的上课前/上课提醒通过"一键配置"写入档案的宿主 GUID 附加对象并可直接回滚，不体现在本文件中。
+### 逐节课调整的三条路径（效果一致）
+
+1. **设置页**：ClassIsland 设置 → ClassExland 预备铃 → 「每节课提前量」，勾选「单独设置」并填秒数，点「应用每节课设置」。
+2. **CLI**：`cex bell list` 查序号 → `cex bell set --index 3 --prep 90 --yes`（写后立即热生效）。
+3. **远程**：清单 `commands` 里下发 `{"command":"bell.set","args":{"index":"3","prep":"90"},"apply":true}`，
+   或在 `snapshot.pluginConfigs` 里给 `bell.json` 整份数组（同步完成后自动重载并同步档案）。
+
+> 宿主自带的上课前/上课提醒通过"一键配置"写入档案的宿主 GUID 附加对象并可直接回滚，不体现在这两个文件中。
 
 时间线行为（`T` 为正式上课时刻，`N` 为该节提前量，`D` 为下课延迟）：
 

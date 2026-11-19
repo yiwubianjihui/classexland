@@ -74,9 +74,17 @@ public sealed class BellProfileWriter
     }
 
     /// <summary>按预览写入档案。仅写我方字段，其他字段保持原样；写前保存快照以供回滚。</summary>
-    public bool Apply()
+    public bool Apply() => ApplyCore(disableHostNotifications: true);
+
+    /// <summary>
+    /// 只把每节课的提前量写进档案（我方附加设置），不改宿主自带的提醒开关。
+    /// 设置页"应用每节课设置"与 CLI bell set 走这条路径。
+    /// </summary>
+    public bool ApplySlotPreps() => ApplyCore(disableHostNotifications: false, rebuildPreview: true);
+
+    private bool ApplyCore(bool disableHostNotifications, bool rebuildPreview = false)
     {
-        if (_lastPreview.Count == 0) BuildPreview();
+        if (rebuildPreview || _lastPreview.Count == 0) BuildPreview();
         _lastRollback.Clear();
         try
         {
@@ -93,18 +101,28 @@ public sealed class BellProfileWriter
 
                 var hadOur = slot.AttachedObjects.TryGetValue(BellConstants.SlotAttachedGuid, out var ourOld);
                 var hadHost = slot.AttachedObjects.TryGetValue(BellConstants.HostNotificationAttachedGuid, out var hostOld);
+
+                // 值没变、又不需要处理宿主提醒时跳过，避免把整份档案都写上我方附加设置。
+                var needWrite = !(hadOur && ourOld is BellSlotSettings oldValue &&
+                                  oldValue.PrepSeconds == change.NewPrepSeconds);
+                var needHostFix = disableHostNotifications && hadHost && hostOld != null;
+                if (!needWrite && !needHostFix) continue;
+
                 var hadPrepOverride = _settings.HasPrepOverride(change.SlotKey);
                 _lastRollback.Add(new BellProfileRollbackEntry(
                     change.TimeLayoutId, change.SlotKey, hadOur, ourOld, hadHost, hostOld,
                     change.OldPrepSeconds, hadPrepOverride));
 
-                slot.WriteAttachedObject(BellConstants.SlotAttachedGuid,
-                    new BellSlotSettings { PrepSeconds = change.NewPrepSeconds });
+                if (needWrite)
+                {
+                    slot.WriteAttachedObject(BellConstants.SlotAttachedGuid,
+                        new BellSlotSettings { PrepSeconds = change.NewPrepSeconds });
 
-                // 同步写入插件自有 bell.json（兜底副本），档案读取失败时仍可工作。
-                _settings.SetPrep(change.SlotKey, change.NewPrepSeconds, change.SlotDisplay);
+                    // 同步写入插件自有 bell.json（兜底副本），档案读取失败时仍可工作。
+                    _settings.SetPrep(change.SlotKey, change.NewPrepSeconds, change.SlotDisplay);
+                }
 
-                if (hadHost && hostOld != null)
+                if (needHostFix)
                 {
                     var updated = DisableBool(hostOld, "IsClassOnPreparingNotificationEnabled");
                     updated = DisableBool(updated, "IsClassOnNotificationEnabled");

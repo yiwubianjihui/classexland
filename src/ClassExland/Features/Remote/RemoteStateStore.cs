@@ -28,6 +28,21 @@ public sealed class RemoteStateStore
         }
     }
 
+    /// <summary>上次成功应用的时间；没有记录时返回 null（供设置页展示）。</summary>
+    public DateTimeOffset? LoadAppliedAt()
+    {
+        try
+        {
+            if (!File.Exists(_path)) return null;
+            var doc = JsonSerializer.Deserialize<StateDoc>(File.ReadAllText(_path), JsonOptions);
+            return doc?.AppliedAt == default ? null : doc?.AppliedAt;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public bool SaveApplied(string version, string etag)
     {
         try

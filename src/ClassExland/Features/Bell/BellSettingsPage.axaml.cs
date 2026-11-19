@@ -1,12 +1,15 @@
+using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using ClassIsland.Core.Abstractions.Controls;
+using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Attributes;
+using ClassIsland.Shared.Models.Profile;
 
 namespace ClassExland.Features.Bell;
 
 /// <summary>
-/// 预备铃设置页：全局参数、Harmony 开关、铃声试听、档案写入预览/确认/回滚。
+/// 预备铃设置页：全局参数、每节课单独提前量、Harmony 开关、铃声试听、档案写入预览/确认/回滚。
 /// 所有事件处理器都包 try/catch，避免插件异常导致 ClassIsland 自动禁用插件。
 /// </summary>
 [SettingsPageInfo(BellConstants.SettingsPageId, "ClassExland 预备铃", "\uE823", "\uE823")]
@@ -17,22 +20,28 @@ public partial class BellSettingsPage : SettingsPageBase
     private readonly BellSoundService _sound;
     private readonly BellTimelineService _timeline;
     private readonly HarmonyPatcher _patcher;
+    private readonly IProfileService _profileService;
+    private readonly ObservableCollection<BellSlotRow> _slotRows = new();
 
     public BellSettingsPage(
         BellSettings settings,
         BellProfileWriter writer,
         BellSoundService sound,
         BellTimelineService timeline,
-        HarmonyPatcher patcher)
+        HarmonyPatcher patcher,
+        IProfileService profileService)
     {
         _settings = settings;
         _writer = writer;
         _sound = sound;
         _timeline = timeline;
         _patcher = patcher;
+        _profileService = profileService;
         InitializeComponent();
         DataContext = this;
+        SlotGrid.ItemsSource = _slotRows;
         LoadToUi();
+        LoadSlotRows();
     }
 
     private void LoadToUi()
@@ -65,6 +74,106 @@ public partial class BellSettingsPage : SettingsPageBase
                 ? "失败，已自动降级为虚拟状态"
                 : "未启用";
         PatchStatusText.Text = $"宿主状态覆盖：{status}";
+    }
+
+    /// <summary>
+    /// 从当前档案读取全部上课段，重建表格。未勾选「单独设置」的行显示全局默认值，
+    /// 勾选的行显示档案或 bell.json 里的实际覆盖值。
+    /// </summary>
+    private void LoadSlotRows()
+    {
+        _slotRows.Clear();
+        try
+        {
+            var slots = BellSlotCatalog.Enumerate(_profileService?.Profile, _settings);
+            foreach (var slot in slots)
+            {
+                var row = new BellSlotRow(
+                    slot.SlotKey,
+                    slot.LayoutName,
+                    slot.IndexInLayout,
+                    $"{slot.Start:hh\\:mm}-{slot.End:hh\\:mm}",
+                    slot.Overridden ? slot.EffectivePrep : _settings.DefaultPrepSeconds)
+                {
+                    UseOverride = slot.Overridden
+                };
+                _slotRows.Add(row);
+            }
+
+            if (_slotRows.Count == 0)
+                StatusText.Text = "当前时间表里没有上课段（TimeType=0），请先在 ClassIsland 课表中添加课程。";
+            else
+                StatusText.Text = $"已读取 {_slotRows.Count} 节课；勾选「单独设置」后填写秒数，再点「应用每节课设置」。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"读取课表失败：{ex.Message}";
+        }
+    }
+
+    private void ButtonReloadSlots_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _settings.Reload();
+            LoadToUi();
+            LoadSlotRows();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"刷新失败：{ex.Message}";
+        }
+    }
+
+    private void ButtonApplySlots_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // 正在编辑的单元格可能还没把 TextBox 的值写回绑定对象，先提交一次。
+            SlotGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+            SlotGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
+            if (_slotRows.Count == 0)
+            {
+                StatusText.Text = "没有可应用的上课段。";
+                return;
+            }
+
+            var preps = new Dictionary<string, int?>();
+            var labels = new Dictionary<string, string?>();
+            foreach (var row in _slotRows)
+            {
+                if (!row.UseOverride)
+                {
+                    preps[row.SlotKey] = null;
+                    continue;
+                }
+
+                var value = row.TryParsePrep();
+                if (value is null)
+                {
+                    StatusText.Text = $"「{row.Display}」的提前量必须是 0–600 的整数。";
+                    return;
+                }
+
+                preps[row.SlotKey] = value;
+                labels[row.SlotKey] = row.Display;
+            }
+
+            _settings.ApplyPreps(preps, labels);
+            var ok = _writer.ApplySlotPreps();
+            _timeline.InvalidateSchedule();
+            LoadSlotRows();
+
+            var overridden = preps.Count(p => p.Value is not null);
+            StatusText.Text = ok
+                ? $"已应用 {preps.Count} 节课的设置（{overridden} 节单独覆盖，其余回到默认 {_settings.DefaultPrepSeconds} 秒）。"
+                : "已保存到 bell.json，但写入档案失败，请查看日志。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"应用失败：{ex.Message}";
+        }
     }
 
     private void SaveFromUi()

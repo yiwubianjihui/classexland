@@ -1,3 +1,4 @@
+using ClassIsland.Core.Extensions.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -24,6 +25,9 @@ public static class RemoteRegistration
         services.AddSingleton<RemoteSyncModule>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RemoteSyncModule>());
         services.AddSingleton<IRemoteSyncService>(sp => sp.GetRequiredService<RemoteSyncModule>());
+
+        // 远程地址/令牌/同步范围全部在设置页里改，不用手编 remote.json。
+        services.AddSettingsPage<RemoteSettingsPage>();
         return services;
     }
 }

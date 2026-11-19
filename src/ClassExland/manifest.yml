@@ -3,7 +3,7 @@ name: ClassExland
 description: 预备铃时间轴、值日表与下课后展示、特殊活动提醒、界面切换、远程配置同步与运维 CLI。
 entranceAssembly: ClassExland.dll
 apiVersion: 2.0.0.0
-version: 1.0.0.1
+version: 1.0.0.2
 author: yibianhui
 url: https://github.com/yiwubianjihui/classexland
 icon: icon.png

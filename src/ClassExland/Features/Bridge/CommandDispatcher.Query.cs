@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using ClassExland.Contracts;
+using ClassExland.Features.Bell;
 
 namespace ClassExland.Features.Bridge;
 
@@ -65,13 +66,41 @@ public sealed partial class CommandDispatcher
 
     private Task<CommandResult> QueryBellListAsync(CommandRequest r, CancellationToken ct)
     {
+        // 优先按"课表里的全部上课段"输出：bell.json 可能还是空的，
+        // 用户需要先看到 index / id 才能逐节设置。
+        var slots = EnumerateBellSlots();
+        if (slots.Count > 0)
+        {
+            var settings = TryService<BellSettings>();
+            var items = slots.Select(s => new
+            {
+                index = s.Index,
+                id = s.SlotKey,
+                slot = s.Display,
+                layout = s.LayoutName,
+                time = $"{s.Start:hh\\:mm}-{s.End:hh\\:mm}",
+                effectivePrepSeconds = s.EffectivePrep,
+                prepSeconds = s.Overridden ? s.EffectivePrep : (int?)null,
+                overridden = s.Overridden
+            }).ToList();
+
+            return Task.FromResult(Ok(new
+            {
+                file = ConfigFiles.Bell,
+                count = items.Count,
+                source = "档案课表 + bell.json",
+                defaultPrepSeconds = settings?.DefaultPrepSeconds,
+                items
+            }));
+        }
+
         using var doc = _store.ReadDocument(ConfigFiles.Bell);
         if (doc is null)
             return Task.FromResult(Ok(new { items = Array.Empty<object>(), note = "bell.json 不存在（尚未配置预备铃）" }));
 
-        var items = ExtractRootArray(doc.RootElement);
+        var rawItems = ExtractRootArray(doc.RootElement);
         var simplified = new List<object?>();
-        foreach (var item in items)
+        foreach (var item in rawItems)
         {
             simplified.Add(new
             {
