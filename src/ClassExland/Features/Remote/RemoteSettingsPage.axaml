@@ -49,6 +49,21 @@
                 <TextBlock Text="一个服务器可以管多台教室电脑：在远程站上按名字登记（如「初一2班」），这里填同一个名字，就只会拿到这台电脑自己的配置快照与指令。第一次用新名字时服务器会自动登记一台空设备；服务器上有多台而这里没填，同步结果会列出可选的名字。"
                            Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
 
+                <!-- 手打中文设备名容易错字，这里直接从服务器拉一份列表来选 -->
+                <WrapPanel Orientation="Horizontal">
+                    <Button x:Name="ButtonFetchDevices" Content="从服务器读取设备列表" Margin="0,0,8,0"
+                            Click="ButtonFetchDevices_OnClick" />
+                    <ComboBox x:Name="DeviceCombo" Width="300" MinHeight="32"
+                              PlaceholderText="选中一台就填进上面的设备名称"
+                              SelectionChanged="DeviceCombo_OnSelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Display}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </WrapPanel>
+
                 <TextBlock x:Name="EndpointHint" Text="清单地址：填好服务器地址后自动生成"
                            Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
 

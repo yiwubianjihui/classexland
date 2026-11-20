@@ -86,6 +86,57 @@ public partial class RemoteSettingsPage : SettingsPageBase
 
     private void DeviceBox_OnTextChanged(object? sender, TextChangedEventArgs e) => UpdateEndpointHint();
 
+    /// <summary>从服务器拉一份设备列表填进下拉，选中后写回「设备名称」。</summary>
+    private async void ButtonFetchDevices_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // 用界面上当前的地址/令牌去问，没必要先落盘；但 SaveFromUi 会顺带校验并提示错误。
+            if (!SaveFromUi()) return;
+            var cfg = _store.Load();
+            if (!cfg.CanSync())
+            {
+                StatusText.Text = "还不能连接：服务器地址要以 https:// 开头，访问令牌不能为空。";
+                return;
+            }
+
+            ButtonFetchDevices.IsEnabled = false;
+            StatusText.Text = "正在读取设备列表…";
+            var result = await _module.FetchDevicesAsync(cfg);
+            DeviceCombo.ItemsSource = result.Devices;
+            StatusText.Text = result.Message;
+            if (result.Ok && result.Devices.Count > 0)
+            {
+                // 已经填过就顺手选中，省一次点击。
+                var current = RemoteConfig.SanitizeDeviceName(DeviceBox.Text);
+                DeviceCombo.SelectedItem = result.Devices.FirstOrDefault(d => d.Name == current);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"读取设备列表失败：{ex.Message}";
+        }
+        finally
+        {
+            ButtonFetchDevices.IsEnabled = true;
+        }
+    }
+
+    private void DeviceCombo_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        try
+        {
+            if (DeviceCombo.SelectedItem is RemoteDeviceInfo info)
+            {
+                DeviceBox.Text = info.Name;
+            }
+        }
+        catch
+        {
+            // 选中项异常不影响手填。
+        }
+    }
+
     private void ManifestPathBox_OnTextChanged(object? sender, TextChangedEventArgs e) => UpdateEndpointHint();
 
     private void UpdateEndpointHint()

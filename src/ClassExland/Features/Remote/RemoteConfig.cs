@@ -146,3 +146,36 @@ public sealed class RemoteConfigStore
         }
     }
 }
+
+/// <summary>
+/// 远程站上登记的一台设备（只有名字与元数据，不含任何配置内容）。
+/// 设置页的「选择设备」下拉用 <see cref="Display"/> 展示。
+/// </summary>
+public sealed class RemoteDeviceInfo
+{
+    public RemoteDeviceInfo(string name, string note, string version, string lastSeen)
+    {
+        Name = name;
+        Note = note;
+        Version = version;
+        LastSeen = lastSeen;
+    }
+
+    public string Name { get; }
+    public string Note { get; }
+    public string Version { get; }
+    public string LastSeen { get; }
+
+    /// <summary>下拉里显示的一行：名字 +（备注 / 未发布 / 从未拉取）。</summary>
+    public string Display
+    {
+        get
+        {
+            var bits = new List<string>();
+            if (!string.IsNullOrWhiteSpace(Note)) bits.Add(Note);
+            if (string.IsNullOrWhiteSpace(Version)) bits.Add("未发布");
+            if (string.IsNullOrWhiteSpace(LastSeen)) bits.Add("从未拉取");
+            return bits.Count == 0 ? Name : $"{Name}（{string.Join(" · ", bits)}）";
+        }
+    }
+}

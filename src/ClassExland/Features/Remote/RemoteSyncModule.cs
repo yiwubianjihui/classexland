@@ -522,6 +522,65 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
     }
 
     /// <summary>
+    /// 拉取服务器上登记的设备名（只含名字、备注、版本与最近拉取时间，不含任何配置内容）。
+    /// 设置页的「选择设备」下拉用它，省得手打中文名字打错。
+    /// </summary>
+    public async Task<(bool Ok, string Message, IReadOnlyList<RemoteDeviceInfo> Devices)> FetchDevicesAsync(
+        RemoteConfig cfg, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(cfg.ServerUrl) || string.IsNullOrWhiteSpace(cfg.BearerToken))
+        {
+            return (false, "先填服务器地址与访问令牌。", Array.Empty<RemoteDeviceInfo>());
+        }
+
+        var url = cfg.ServerUrl.TrimEnd('/') + cfg.ManifestPath;
+        url += (cfg.ManifestPath.Contains('?') ? "&" : "?") + "list=1";
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.BearerToken);
+            using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                var hint = await DescribeHttpFailureAsync(resp, ct).ConfigureAwait(false);
+                _audit.Log("device-list", $"HTTP {(int)resp.StatusCode}", ok: false);
+                return (false, $"读取设备列表失败：HTTP {(int)resp.StatusCode}{hint}", Array.Empty<RemoteDeviceInfo>());
+            }
+
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("devices", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            {
+                return (false, "服务器没有返回设备列表（远程站版本可能较旧，可手动填写设备名称）。",
+                    Array.Empty<RemoteDeviceInfo>());
+            }
+
+            var list = new List<RemoteDeviceInfo>();
+            foreach (var el in arr.EnumerateArray())
+            {
+                var name = el.TryGetProperty("name", out var n) ? n.GetString() : null;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                list.Add(new RemoteDeviceInfo(
+                    name!,
+                    el.TryGetProperty("note", out var note) ? note.GetString() ?? "" : "",
+                    el.TryGetProperty("version", out var ver) ? ver.GetString() ?? "" : "",
+                    el.TryGetProperty("last_seen", out var seen) ? seen.GetString() ?? "" : ""));
+            }
+
+            _audit.Log("device-list", $"{list.Count} 台", ok: true);
+            return (true, list.Count == 0 ? "服务器上还没有登记任何设备。" : $"服务器上有 {list.Count} 台设备。", list);
+        }
+        catch (Exception ex)
+        {
+            _audit.Log("device-list", $"{ex.GetType().Name}: {ex.Message}", ok: false);
+            return (false, $"读取设备列表失败：{ex.Message}", Array.Empty<RemoteDeviceInfo>());
+        }
+    }
+
+    /// <summary>
     /// 把服务端的错误码翻成人话。最常见的两种是多设备服务器没指定设备名、以及设备名写错，
     /// 服务端会在 body 里列出可选设备，这里一并显示出来。
     /// </summary>

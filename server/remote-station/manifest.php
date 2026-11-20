@@ -37,6 +37,23 @@ if ($token === '' || !hash_equals((string)$config['api_token'], $token)) {
 
 $names = cx_device_names($state);
 
+// ?list=1：只列设备名与版本（不返回任何配置内容），给客户端的「选择设备」下拉用。
+if (isset($_GET['list'])) {
+    $items = [];
+    foreach ($names as $name) {
+        $dev = $state['devices'][$name];
+        $items[] = [
+            'name'       => $name,
+            'note'       => (string)($dev['note'] ?? ''),
+            'version'    => (string)($dev['version'] ?? ''),
+            'updated_at' => (string)($dev['updated_at'] ?? ''),
+            'last_seen'  => (string)($dev['last_seen'] ?? ''),
+        ];
+    }
+    cx_log_request('list', 200, count($items) . ' 台设备');
+    cx_json_out(200, ['devices' => $items]);
+}
+
 $deviceName = cx_device_name((string)($_GET['device'] ?? (cx_header('X-ClassExland-Device'))));
 
 if ($deviceName === '') {
