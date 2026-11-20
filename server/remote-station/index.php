@@ -157,6 +157,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         cx_redirect('设备名已改为「' . $to . '」。记得把客户端的设备名也改过来。');
     }
 
+    if ($action === 'device_clone') {
+        $from = cx_device_name((string)($_POST['from'] ?? ''));
+        $to   = cx_device_name((string)($_POST['to'] ?? ''));
+        if (!isset($state['devices'][$from])) {
+            cx_redirect('作为模板的设备不存在。');
+        }
+        if (!cx_device_name_ok($to)) {
+            cx_redirect('新设备名不合法。');
+        }
+        if (isset($state['devices'][$to])) {
+            cx_redirect('已经有一台叫「' . $to . '」的设备了。');
+        }
+        $src = $state['devices'][$from];
+        $dev = cx_default_device();
+        $dev['note']       = '复制自「' . $from . '」';
+        $dev['created_at'] = date('Y-m-d H:i:s');
+        $dev['files']      = $src['files'] ?? [];
+        $dev['commands']   = $src['commands'] ?? [];
+        if (!empty($dev['files'])) {
+            // 复制出来的算一次新发布：有自己的版本与 etag，客户端才会认为有变化。
+            $dev['version']    = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
+            $dev['updated_at'] = date('Y-m-d H:i:s');
+            $dev['etag']       = substr(hash('sha256', cx_build_manifest($dev, $to)), 0, 12);
+        }
+        $state['devices'][$to] = $dev;
+        $state['selected'] = $to;
+        cx_save_state($state);
+        cx_log_request('device_clone', 200, $from . ' -> ' . $to);
+        cx_redirect('已复制成「' . $to . '」，记得把客户端的设备名也改成它。');
+    }
+
     if ($action === 'device_delete') {
         $name = cx_device_name((string)($_POST['name'] ?? ''));
         if (!isset($state['devices'][$name])) {
@@ -478,6 +509,16 @@ $hmac  = (string)$config['hmac_secret'];
           <button class="danger" type="submit">删除</button>
         </form>
       </div>
+
+      <h3>以「<?= cx_h($selected) ?>」为模板复制一台</h3>
+      <p class="muted" style="margin:0 0 6px">几个班用同一份值日表 / 铃声时最省事：复制出来的设备自带同样的快照与指令队列，版本号是新的。</p>
+      <form method="post" class="inline">
+        <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
+        <input type="hidden" name="action" value="device_clone">
+        <input type="hidden" name="from" value="<?= cx_h($selected) ?>">
+        <input type="text" name="to" placeholder="新设备名，例如 初一3班" maxlength="40" required>
+        <button type="submit">复制</button>
+      </form>
     <?php endif; ?>
   </section>
 
