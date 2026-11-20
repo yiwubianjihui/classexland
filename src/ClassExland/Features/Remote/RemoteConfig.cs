@@ -19,6 +19,12 @@ public sealed class RemoteConfig
     /// <summary>清单路径（相对 ServerUrl）。</summary>
     public string ManifestPath { get; set; } = "/config/manifest.json";
 
+    /// <summary>
+    /// 设备名。同一个远程站上按名字区分多台教室电脑（每台只有自己那份快照与指令队列）。
+    /// 留空表示「不指定」：服务器上只有一台设备时照样能用，多台时会提示你填。
+    /// </summary>
+    public string DeviceName { get; set; } = "";
+
     /// <summary>Bearer 令牌，不写进代码。</summary>
     public string BearerToken { get; set; } = "";
 
@@ -45,6 +51,7 @@ public sealed class RemoteConfig
         c.ServerUrl = (c.ServerUrl ?? "").Trim().TrimEnd('/');
         c.ManifestPath = string.IsNullOrWhiteSpace(c.ManifestPath) ? "/config/manifest.json" : c.ManifestPath.Trim();
         if (!c.ManifestPath.StartsWith('/')) c.ManifestPath = "/" + c.ManifestPath;
+        c.DeviceName = SanitizeDeviceName(c.DeviceName);
         c.BearerToken ??= "";
         c.HmacSecret ??= "";
         c.FetchTimeoutSeconds = c.FetchTimeoutSeconds is < 1 or > 120 ? 15 : c.FetchTimeoutSeconds;
@@ -58,6 +65,21 @@ public sealed class RemoteConfig
         => Enabled
            && ServerUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
            && !string.IsNullOrWhiteSpace(BearerToken);
+
+    /// <summary>设备名只留可打印字符，最长 40——和服务端 <c>cx_device_name()</c> 对齐。</summary>
+    public static string SanitizeDeviceName(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+
+        var sb = new System.Text.StringBuilder(raw.Length);
+        foreach (var ch in raw.Trim())
+        {
+            if (char.IsControl(ch)) continue;
+            sb.Append(ch);
+            if (sb.Length >= 40) break;
+        }
+        return sb.ToString().Trim();
+    }
 }
 
 public sealed class LoopbackWebConfig

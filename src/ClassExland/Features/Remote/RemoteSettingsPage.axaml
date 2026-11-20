@@ -31,15 +31,23 @@
 
                 <CheckBox x:Name="EnabledCheck" Content="启用远程控制" />
 
-                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto">
+                <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="服务器地址" VerticalAlignment="Center" Margin="0,0,12,8" />
                     <TextBox Grid.Row="0" Grid.Column="1" x:Name="ServerUrlBox" Margin="0,0,0,8"
                              Watermark="https://你的域名" TextChanged="ServerUrlBox_OnTextChanged" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="访问令牌" VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="TokenBox" PasswordChar="●"
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="设备名称" VerticalAlignment="Center" Margin="0,0,12,8" />
+                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="DeviceBox" Margin="0,0,0,8"
+                             Watermark="留空表示不指定（一台设备时可不填）"
+                             TextChanged="DeviceBox_OnTextChanged" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="访问令牌" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="TokenBox" PasswordChar="●"
                              Watermark="管理员提供的一串字符" />
                 </Grid>
+
+                <TextBlock Text="一个服务器可以管多台教室电脑：在远程站上按名字登记（如「初一2班」），这里填同一个名字，就只会拿到这台电脑自己的配置快照与指令。第一次用新名字时服务器会自动登记一台空设备；服务器上有多台而这里没填，同步结果会列出可选的名字。"
+                           Opacity="0.65" FontSize="12" TextWrapping="Wrap" />
 
                 <TextBlock x:Name="EndpointHint" Text="清单地址：填好服务器地址后自动生成"
                            Opacity="0.6" FontSize="12" TextWrapping="Wrap" />

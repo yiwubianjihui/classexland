@@ -18,6 +18,7 @@ const CX_CONFIG_FILE  = CX_DATA_DIR . '/config.php';
 const CX_STATE_FILE   = CX_DATA_DIR . '/state.php';
 const CX_ALLOWED_KEYS = ['bell.json', 'duty.json', 'activities.json', 'layout.json'];
 const CX_MAX_BODY     = 524288; // 512 KB
+const CX_MAX_DEVICES  = 32;     // 一个人身兼多个班级也够用了
 
 function cx_boot(): void
 {
@@ -47,21 +48,32 @@ function cx_write_atomic(string $path, string $content): bool
  * 写回新文件后 include 仍然返回旧内容（实测会把刚发布的版本覆盖回空状态）。
  * 这里用 `<?php exit; ?>` + JSON 的形式，读取走 file_get_contents，
  * 直接访问时 PHP 执行 exit，不会输出任何内容。
+ *
+ * $strict = true 时，「文件存在但读不出来／解析不了」会抛异常，
+ * 而不是返回 null —— 否则上层会当成「还没初始化」，静默用空状态覆盖掉真实数据
+ * （root 跑过一次 CLI 把文件属主改成 root、php-fpm 读不到，就踩过这个）。
  */
-function cx_read_store(string $path): ?array
+function cx_read_store(string $path, bool $strict = false): ?array
 {
     if (!file_exists($path)) {
         return null;
     }
     $raw = @file_get_contents($path);
     if ($raw === false) {
+        if ($strict) {
+            throw new RuntimeException('无法读取 ' . basename($path) . '（检查文件属主与权限）');
+        }
         return null;
     }
+
     $pos = strpos($raw, "\n");
     if ($pos !== false) {
         $data = json_decode(substr($raw, $pos + 1), true);
         if (is_array($data)) {
             return $data;
+        }
+        if ($strict) {
+            throw new RuntimeException(basename($path) . ' 内容不是合法 JSON');
         }
     }
 
@@ -76,6 +88,9 @@ function cx_read_store(string $path): ?array
         }
     }
 
+    if ($strict) {
+        throw new RuntimeException(basename($path) . ' 格式无法识别');
+    }
     return null;
 }
 
@@ -100,7 +115,7 @@ function cx_default_config(): array
 
 function cx_load_config(): array
 {
-    $config = cx_read_store(CX_CONFIG_FILE);
+    $config = cx_read_store(CX_CONFIG_FILE, true);
     return is_array($config) ? array_merge(cx_default_config(), $config) : cx_default_config();
 }
 
@@ -109,27 +124,120 @@ function cx_save_config(array $config): bool
     return cx_write_store(CX_CONFIG_FILE, $config);
 }
 
+/**
+ * 状态结构（v2，多设备）：
+ *
+ *   devices: {
+ *     "初一2班": {
+ *        note, created_at, updated_at, version, etag,
+ *        files:    {'bell.json' => '<原始 JSON 文本>', ...},
+ *        commands: [{command, args, apply, dryRun}, ...],
+ *        last_seen, last_ip, last_client, last_version
+ *     }, ...
+ *   }
+ *   requests: 最近访问
+ *   selected: 管理页当前选中的设备
+ *
+ * v1（单快照：顶层直接有 files/commands/version）读到后自动包成一台叫「默认设备」的。
+ */
+function cx_default_device(): array
+{
+    return [
+        'note'         => '',
+        'created_at'   => '',
+        'updated_at'   => '',
+        'version'      => '',
+        'etag'         => '',
+        'files'        => [],
+        'commands'     => [],
+        'last_seen'    => '',
+        'last_ip'      => '',
+        'last_client'  => '',
+        'last_version' => '',
+    ];
+}
+
 function cx_default_state(): array
 {
     return [
-        'version'       => '',
-        'etag'          => '',
-        'updated_at'    => '',
-        'files'         => [], // ['bell.json' => '<原始 JSON 文本>', ...]
-        'commands'      => [],
-        'requests'      => [],
+        'devices'  => [],
+        'requests' => [],
+        'selected' => '',
     ];
+}
+
+/** 设备名：允许中英文数字、空格与 -_ . ，最长 40，去掉控制字符。 */
+function cx_device_name(string $raw): string
+{
+    $name = trim(preg_replace('/[\x00-\x1F\x7F]/u', '', $raw) ?? '');
+    return mb_substr($name, 0, 40);
+}
+
+function cx_device_name_ok(string $name): bool
+{
+    return $name !== '' && preg_match('/^[\p{Han}\p{L}\p{N}][\p{Han}\p{L}\p{N} \-_.()（）]*$/u', $name) === 1;
+}
+
+/** 把可能残留的 v1 状态升级成 v2。 */
+function cx_upgrade_state(array $state): array
+{
+    if (isset($state['devices']) && is_array($state['devices'])) {
+        foreach ($state['devices'] as $name => $dev) {
+            $state['devices'][$name] = array_merge(cx_default_device(), is_array($dev) ? $dev : []);
+        }
+        return array_merge(cx_default_state(), $state);
+    }
+
+    if (isset($state['files']) || isset($state['version']) || isset($state['commands'])) {
+        $dev = array_merge(cx_default_device(), [
+            'files'      => is_array($state['files'] ?? null) ? $state['files'] : [],
+            'commands'   => is_array($state['commands'] ?? null) ? $state['commands'] : [],
+            'version'    => (string)($state['version'] ?? ''),
+            'etag'       => (string)($state['etag'] ?? ''),
+            'updated_at' => (string)($state['updated_at'] ?? ''),
+            'created_at' => (string)($state['updated_at'] ?? ''),
+        ]);
+        return [
+            'devices'  => ['默认设备' => $dev],
+            'requests' => is_array($state['requests'] ?? null) ? $state['requests'] : [],
+            'selected' => '默认设备',
+        ];
+    }
+
+    return array_merge(cx_default_state(), $state);
 }
 
 function cx_load_state(): array
 {
-    $state = cx_read_store(CX_STATE_FILE);
-    return is_array($state) ? array_merge(cx_default_state(), $state) : cx_default_state();
+    $state = cx_read_store(CX_STATE_FILE, true);
+    return cx_upgrade_state(is_array($state) ? $state : cx_default_state());
 }
 
 function cx_save_state(array $state): bool
 {
     return cx_write_store(CX_STATE_FILE, $state);
+}
+
+/** 取某台设备的快照（引用）；不存在返回 null。 */
+function &cx_device_ref(array &$state, string $name)
+{
+    $null = null;
+    if ($name === '' || !isset($state['devices'][$name])) {
+        return $null;
+    }
+    return $state['devices'][$name];
+}
+
+/** 设备名列表，按创建/更新排序。 */
+function cx_device_names(array $state): array
+{
+    $names = array_keys($state['devices']);
+    usort($names, static function (string $a, string $b) use ($state): int {
+        $ua = (string)($state['devices'][$a]['updated_at'] ?? '');
+        $ub = (string)($state['devices'][$b]['updated_at'] ?? '');
+        return strcmp($ub, $ua) ?: strcmp($a, $b);
+    });
+    return $names;
 }
 
 /** 读取请求头（不同 SAPI 拿 Authorization 的方式不一样）。 */
@@ -175,17 +283,22 @@ function cx_json_out(int $status, array $data, array $headers = []): void
 /** 记录一次访问（只保留最近 60 条，存在 state.php 里，不产生明文日志文件）。 */
 function cx_log_request(string $action, int $status, string $note = ''): void
 {
-    $state = cx_load_state();
-    $entry = [
-        'at'     => date('Y-m-d H:i:s'),
-        'ip'     => $_SERVER['REMOTE_ADDR'] ?? '-',
-        'action' => $action,
-        'status' => $status,
-        'note'   => mb_substr($note, 0, 200),
-    ];
-    array_unshift($state['requests'], $entry);
-    $state['requests'] = array_slice($state['requests'], 0, 60);
-    cx_save_state($state);
+    try {
+        $state = cx_load_state();
+        $entry = [
+            'at'     => date('Y-m-d H:i:s'),
+            'ip'     => $_SERVER['REMOTE_ADDR'] ?? '-',
+            'action' => $action,
+            'status' => $status,
+            'note'   => mb_substr($note, 0, 200),
+        ];
+        array_unshift($state['requests'], $entry);
+        $state['requests'] = array_slice($state['requests'], 0, 60);
+        cx_save_state($state);
+    } catch (Throwable $ex) {
+        // 记日志本身不该让请求失败（存储坏了的时候上层会给明确的 500）。
+        error_log('[ClassExland] log failed: ' . $ex->getMessage());
+    }
 }
 
 function cx_new_token(int $bytes = 24): string
@@ -194,12 +307,12 @@ function cx_new_token(int $bytes = 24): string
 }
 
 /**
- * 生成清单原文。插件配置原样嵌入，不做 decode/encode。
+ * 生成某台设备的清单原文。插件配置原样嵌入，不做 decode/encode。
  */
-function cx_build_manifest(array $state): string
+function cx_build_manifest(array $device, string $deviceName = ''): string
 {
     $pairs = [];
-    foreach ($state['files'] as $name => $raw) {
+    foreach (($device['files'] ?? []) as $name => $raw) {
         if (!in_array($name, CX_ALLOWED_KEYS, true)) {
             continue;
         }
@@ -209,11 +322,11 @@ function cx_build_manifest(array $state): string
         $pairs[] = json_encode($name, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ':' . $raw;
     }
 
-    $version = $state['version'] !== '' ? $state['version'] : '0';
-    $etag    = $state['etag'] !== '' ? $state['etag'] : '0';
+    $version = ($device['version'] ?? '') !== '' ? (string)$device['version'] : '0';
+    $etag    = ($device['etag'] ?? '') !== '' ? (string)$device['etag'] : '0';
 
     $commands = [];
-    foreach ($state['commands'] as $cmd) {
+    foreach (($device['commands'] ?? []) as $cmd) {
         if (!is_array($cmd) || empty($cmd['command'])) {
             continue;
         }
@@ -232,6 +345,7 @@ function cx_build_manifest(array $state): string
     }
 
     return '{'
+        . ($deviceName !== '' ? '"device":' . json_encode($deviceName, JSON_UNESCAPED_UNICODE) . ',' : '')
         . '"version":' . json_encode($version) . ','
         . '"etag":' . json_encode($etag) . ','
         . '"snapshot":{"pluginConfigs":{' . implode(',', $pairs) . '}},'

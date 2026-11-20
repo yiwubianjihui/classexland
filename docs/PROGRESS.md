@@ -282,3 +282,42 @@ sha256 `8052142d…f567bb`）与 `SHA256SUMS`。
 
 构建 0 错误、单测 42/42、`ClassExland.cipx` 285113 B；实机 DLL 已换成 1.0.0.5
 （旧 1.0.0.4 留在 `artifacts/backup-1.0.0.4.dll`），`cex` 同步重新发布。
+
+## 2026-11-20 23:20 · 1.0.0.6（多设备快照 / 时段改名 / 搬到 classisland.yibianhui.cn）
+
+用户这一轮三条：身兼多个班级要能按设备名分别下发、时段别显示具体时间、远程站换域名。
+
+**① 多设备：一个站管多间教室。**
+把 `state.php` 从「单快照」升到 v2：`devices{名字 → {files, commands, version, etag, last_seen…}}`，
+读旧状态时自动包成一台「默认设备」。`manifest.php` 按 `?device=`（或 `X-ClassExland-Device` 头）
+取对应快照；客户端 `RemoteConfig.DeviceName` 会拼进 query，并在头里再带一份当退路。
+本地只有一台设备时不传 device 仍然可用；多于一台且没传 → 400 + 可选名字列表，
+客户端把 `device_required` / `unauthorized` / `too_many_devices` 翻成中文提示。
+
+顺手做了一个"自动登记"：客户端第一次带着某个名字来拉，服务端就建一台空设备
+（只接受合法名字、上限 32 台）。这样老师在新电脑上填个名字就能在管理页看到它、
+直接发布，不必先跑去后台建。名字打错也只是多一台空设备（空快照 = 本机配置不动），删掉即可。
+
+**② 时段标签改粗粒度。**
+新增 `Features/Duty/DutySlotLabels.cs`：按开始时间给 上午/下午/傍晚/晚上，
+单时段且跨度 ≥ 6 小时叫「全天」；重名自动加序号（两个下午 → 下午 / 下午2）。
+`DutyService.Load` 时把旧配置里像 `07:00` 的标签批量换掉并同步 `Items.SlotLabel`，改完落盘一次；
+迁移服务也走同一套。实机 `duty.json` 已就地改成 上午 / 下午 / 傍晚（3 时段 23 项）。
+
+**③ 远程站搬到 `https://classisland.yibianhui.cn/remote/`。**
+站点与证书是用户自己建好的（`/www/wwwroot/classisland.yibianhui.cn`，PHP 8.5，`enable-php-85.conf`）。
+把四个 PHP 传上去、从旧站 `qn.yibianhui.cn` 复制 `data/config.php`（令牌/密钥/管理员密码原样沿用，
+客户端只改服务器地址），旧 state 升级成 v2 后写入。验收：无令牌 401、带令牌 200、
+签名头与本机 `hmac_sha256` 逐字节一致、管理页登录后能切换设备、`php -l` 全过、`nginx -t` 通过。
+旧站保留不删，`remote.json` 里换地址即可（备份 `remote.json.bak-before-classisland-domain`）。
+
+**踩到的坑（值得记）：**
+用 root 跑 CLI 脚本写 `state.php`，`rename` 出来的文件属主是 root:root，
+php-fpm 读不到 → `file_get_contents` 失败 → 当时 `cx_load_state()` 把"读不出来"当成"还没初始化"，
+**用空状态覆盖了已发布的快照**（版本号从 `20261120-004925` 变回 0）。
+修法两层：CLI 写完后一律 `chown -R www:www`；`cx_read_store($path, $strict)` 在文件存在却读不出/解析不了时抛异常，
+管理页直接显示「远程站读不到数据文件」并给出 chown/chmod 命令，`manifest.php` 返回
+`500 station_storage_error`——宁可报错，也不静默清空。
+
+构建 0 错误、单测 56/56（新增 `DutySlotLabelsTests` 11 例 + `RemoteDeviceNameTests` 3 例）、
+`ClassExland.cipx` 288669 B；实机 DLL 与 `cex` 已换 1.0.0.6（旧版备份 `artifacts/backup-1.0.0.5.dll`）。

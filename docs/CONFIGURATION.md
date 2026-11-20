@@ -114,6 +114,11 @@
 > 手工编辑、脚本迁移或远程快照都要照这个规则写：把 `WeekDays` 写成 `weekDays`，插件会静默读不到、
 > 退回默认值（周一至周五），而且不会报错。判断依据：插件自己保存的 `duty.json` 就是这个混合形态。
 
+> 🕗 **时段名不写具体时间**：界面、主界面徽章、提醒文案都只说「上午 / 下午 / 傍晚 / 晚上」，
+> 单个覆盖整天（跨度 ≥ 6 小时）的时段说「全天」。如果旧配置里把开始时间当标签（`07:00`），
+> 插件加载时会自动换成粗粒度名字，并把 `Items` 里对应的 `SlotLabel` 一起改掉——
+> 时段边界仍然按 `Start` / `End` 判断，换的只是显示用的名字。
+
 ```jsonc
 {
   "enabled": true,
@@ -126,22 +131,23 @@
   },
   "plans": [
     {
-      "name": "值日表",
-      "enabled": true,
-      "scope": "FullDay",            // Morning | Afternoon | FullDay | Custom
-      "weekDays": [true, true, true, true, true, false, false], // 周一…周日
-      "timeSlots": [
-        { "label": "早读", "start": "07:30:00", "end": "08:00:00" }
+      "Name": "值日表",
+      "Enabled": true,
+      "Scope": "FullDay",            // Morning | Afternoon | FullDay | Custom
+      "WeekDays": [true, true, true, true, true, false, false], // 周一…周日
+      "TimeSlots": [
+        // Label 是粗粒度说法（上午 / 下午 / 傍晚 / 晚上 / 全天），不要把 07:30 这种时间当名字
+        { "Label": "早读", "Start": "07:30:00", "End": "08:00:00" }
       ],
-      "items": [
+      "Items": [
         {
-          "project": "扫地",
-          "persons": "张三,李四",    // 分隔文本（非数组）
-          "color": null,
-          "isSweep": false,          // 大扫除类可选整屏样式
-          "remindEnabled": true,     // 是否在提醒中显示该项目
-          "slotLabel": "早读",
-          "weekday": -1              // -1=每天；0=周日 … 6=周六
+          "Project": "扫地",
+          "Persons": "张三,李四",    // 分隔文本（非数组）
+          "Color": null,
+          "IsSweep": false,          // 大扫除类可选整屏样式
+          "RemindEnabled": true,     // 是否在提醒中显示该项目
+          "SlotLabel": "早读",       // 必须与某个 TimeSlot 的 Label 一致
+          "Weekday": -1              // -1=每天；0=周日 … 6=周六
         }
       ]
     }

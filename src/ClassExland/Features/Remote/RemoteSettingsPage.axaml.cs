@@ -57,6 +57,7 @@ public partial class RemoteSettingsPage : SettingsPageBase
             var cfg = _store.Load();
             EnabledCheck.IsChecked = cfg.Enabled;
             ServerUrlBox.Text = cfg.ServerUrl;
+            DeviceBox.Text = cfg.DeviceName;
             ManifestPathBox.Text = cfg.ManifestPath;
             TokenBox.Text = cfg.BearerToken;
             SecretBox.Text = cfg.HmacSecret;
@@ -83,10 +84,13 @@ public partial class RemoteSettingsPage : SettingsPageBase
 
     private void ServerUrlBox_OnTextChanged(object? sender, TextChangedEventArgs e) => UpdateEndpointHint();
 
+    private void DeviceBox_OnTextChanged(object? sender, TextChangedEventArgs e) => UpdateEndpointHint();
+
     private void ManifestPathBox_OnTextChanged(object? sender, TextChangedEventArgs e) => UpdateEndpointHint();
 
     private void UpdateEndpointHint()
-    {        try
+    {
+        try
         {
             var url = ServerUrlBox.Text?.Trim().TrimEnd('/') ?? "";
             if (url.Length == 0)
@@ -97,7 +101,11 @@ public partial class RemoteSettingsPage : SettingsPageBase
             var path = ManifestPathBox.Text?.Trim();
             if (string.IsNullOrWhiteSpace(path)) path = "/config/manifest.json";
             if (!path.StartsWith('/')) path = "/" + path;
-            EndpointHint.Text = $"清单地址：{url}{path}";
+
+            var device = RemoteConfig.SanitizeDeviceName(DeviceBox.Text);
+            EndpointHint.Text = device.Length == 0
+                ? $"清单地址：{url}{path}（未指定设备）"
+                : $"清单地址：{url}{path}?device={Uri.EscapeDataString(device)}";
         }
         catch
         {
@@ -125,7 +133,9 @@ public partial class RemoteSettingsPage : SettingsPageBase
             else
             {
                 StatusBadge.Text = "已启用";
-                StatusSubText.Text = cfg.ServerUrl;
+                StatusSubText.Text = string.IsNullOrEmpty(cfg.DeviceName)
+                    ? cfg.ServerUrl
+                    : $"{cfg.ServerUrl} · 设备 {cfg.DeviceName}";
             }
 
             var appliedAt = _state.LoadAppliedAt();
@@ -177,6 +187,7 @@ public partial class RemoteSettingsPage : SettingsPageBase
 
         cfg.Enabled = EnabledCheck.IsChecked == true;
         cfg.ServerUrl = ServerUrlBox.Text?.Trim().TrimEnd('/') ?? "";
+        cfg.DeviceName = RemoteConfig.SanitizeDeviceName(DeviceBox.Text);
         cfg.ManifestPath = string.IsNullOrWhiteSpace(ManifestPathBox.Text)
             ? "/config/manifest.json"
             : ManifestPathBox.Text!.Trim();
@@ -387,6 +398,7 @@ public partial class RemoteSettingsPage : SettingsPageBase
         sb.AppendLine($"界面状态：{StatusBadge.Text} / {StatusSubText.Text}");
         sb.AppendLine($"启用：{cfg.Enabled}，可同步：{cfg.CanSync()}");
         sb.AppendLine($"服务器：{(string.IsNullOrEmpty(cfg.ServerUrl) ? "未填" : cfg.ServerUrl)}");
+        sb.AppendLine($"设备名称：{(string.IsNullOrEmpty(cfg.DeviceName) ? "（未指定）" : cfg.DeviceName)}");
         sb.AppendLine($"清单路径：{cfg.ManifestPath}");
         sb.AppendLine($"访问令牌：{(string.IsNullOrEmpty(cfg.BearerToken) ? "未填" : $"已填（{cfg.BearerToken.Length} 字符）")}");
         sb.AppendLine($"签名密钥：{(string.IsNullOrEmpty(cfg.HmacSecret) ? "未填" : "已填")}");

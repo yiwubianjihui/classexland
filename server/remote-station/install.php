@@ -34,11 +34,19 @@ $config['admin_password'] = password_hash($password, PASSWORD_DEFAULT);
 $config['api_token'] = cx_new_token();
 $config['hmac_secret'] = cx_new_token(32);
 cx_save_config($config);
-cx_save_state(cx_default_state());
+
+// 先建一台「默认设备」，客户端什么都不填也能直接拉（多设备时才会强制指定）。
+$state = cx_default_state();
+$first = cx_default_device();
+$first['created_at'] = date('Y-m-d H:i:s');
+$state['devices']['默认设备'] = $first;
+$state['selected'] = '默认设备';
+cx_save_state($state);
 
 echo json_encode([
-    'token' => $config['api_token'],
-    'hmac'  => $config['hmac_secret'],
+    'token'   => $config['api_token'],
+    'hmac'    => $config['hmac_secret'],
+    'devices' => cx_device_names($state),
 ]), "\n";
 
 @unlink(__FILE__);

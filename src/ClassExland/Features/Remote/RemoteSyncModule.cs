@@ -210,13 +210,13 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             string? headerSignature = null;
             using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) })
             {
-                var url = cfg.ServerUrl + cfg.ManifestPath;
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.BearerToken);
+                var url = BuildManifestUrl(cfg);
+                using var req = BuildRequest(cfg, url);
                 using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    report.Add($"下载失败：HTTP {(int)resp.StatusCode}");
+                    var hint = await DescribeHttpFailureAsync(resp, ct).ConfigureAwait(false);
+                    report.Add($"下载失败：HTTP {(int)resp.StatusCode}{hint}");
                     _audit.Log("download-fail", $"{url} -> {(int)resp.StatusCode}", ok: false);
                     report.Ok = false;
                     return report;
@@ -376,13 +376,13 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             string? headerSignature = null;
             using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) })
             {
-                var url = cfg.ServerUrl + cfg.ManifestPath;
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.BearerToken);
+                var url = BuildManifestUrl(cfg);
+                using var req = BuildRequest(cfg, url);
                 using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    report.Add($"拉取清单失败：HTTP {(int)resp.StatusCode}");
+                    var hint = await DescribeHttpFailureAsync(resp, ct).ConfigureAwait(false);
+                    report.Add($"拉取清单失败：HTTP {(int)resp.StatusCode}{hint}");
                     _audit.Log("poll-fail", $"{(int)resp.StatusCode}", ok: false);
                     report.Ok = false;
                     return report;
@@ -488,6 +488,79 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
         catch (Exception ex)
         {
             _audit.Log("bell-refresh-fail", ex.Message, ok: false);
+        }
+    }
+
+    /// <summary>
+    /// 拼清单地址。配了设备名就带上 <c>?device=</c>——同一个服务器上每台教室电脑只拿自己那份快照。
+    /// </summary>
+    private static string BuildManifestUrl(RemoteConfig cfg)
+    {
+        var url = cfg.ServerUrl.TrimEnd('/') + cfg.ManifestPath;
+        var device = (cfg.DeviceName ?? "").Trim();
+        if (device.Length == 0) return url;
+
+        var separator = cfg.ManifestPath.Contains('?') ? '&' : '?';
+        return url + separator + "device=" + Uri.EscapeDataString(device);
+    }
+
+    private static HttpRequestMessage BuildRequest(RemoteConfig cfg, string url)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.BearerToken);
+
+        var device = (cfg.DeviceName ?? "").Trim();
+        // 设备名同时放进头里：少数反代/防火墙会吃掉 query，留着当退路。
+        if (device.Length > 0)
+            req.Headers.TryAddWithoutValidation("X-ClassExland-Device", device);
+
+        var version = typeof(RemoteSyncModule).Assembly.GetName().Version?.ToString();
+        if (!string.IsNullOrEmpty(version))
+            req.Headers.TryAddWithoutValidation("X-ClassExland-Version", version);
+
+        return req;
+    }
+
+    /// <summary>
+    /// 把服务端的错误码翻成人话。最常见的两种是多设备服务器没指定设备名、以及设备名写错，
+    /// 服务端会在 body 里列出可选设备，这里一并显示出来。
+    /// </summary>
+    private static async Task<string> DescribeHttpFailureAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        if ((int)resp.StatusCode is not (400 or 401 or 403 or 404)) return "";
+
+        try
+        {
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (body.Length > 400) body = body[..400];
+
+            using var doc = JsonDocument.Parse(body);
+            var error = doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
+
+            var devices = "";
+            if (doc.RootElement.TryGetProperty("devices", out var list) && list.ValueKind == JsonValueKind.Array)
+            {
+                devices = string.Join("、", list.EnumerateArray()
+                    .Select(x => x.GetString())
+                    .Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+
+            return error switch
+            {
+                "unauthorized" => "（访问令牌不对）",
+                "device_required" => devices.Length > 0
+                    ? $"（服务器上有多个设备，请在「设备名称」里选一个：{devices}）"
+                    : "（服务器还没建任何设备）",
+                "unknown_device" => devices.Length > 0
+                    ? $"（设备名不存在，可选：{devices}）"
+                    : "（设备名不存在）",
+                null => "",
+                _ => $"（{error}）"
+            };
+        }
+        catch
+        {
+            return "";
         }
     }
 

@@ -220,6 +220,8 @@ public sealed class MigrationService : IDutyMigrationService
                     }
                 }
             }
+            // 旧插件把开始时间当分组名（07:00），搬过来后统一换成上午/下午/傍晚。
+            DutySlotLabels.Normalize(plan);
             plans.Add(plan);
             result.AddedPlans++;
         }

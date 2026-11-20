@@ -44,6 +44,26 @@ public sealed class DutyService : IDutyQuery
                 }
             });
         }
+
+        // 旧配置常把「07:00」当标签用（迁移脚本早期版本就是这样），界面上会直接露出具体时间。
+        // 这里换成上午/下午/傍晚，并把值日项的时段引用一起改掉，改完顺手落盘一次。
+        var changed = false;
+        foreach (var plan in settings.Plans)
+        {
+            changed |= DutySlotLabels.Normalize(plan);
+        }
+        if (changed)
+        {
+            try
+            {
+                ConfigureFileHelper.SaveConfig(path, settings);
+            }
+            catch
+            {
+                // 落盘失败不影响本次使用：内存里已经是新标签了。
+            }
+        }
+
         return settings;
     }
 
