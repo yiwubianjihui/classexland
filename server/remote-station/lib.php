@@ -109,6 +109,7 @@ function cx_default_config(): array
         'admin_password' => '',
         'api_token'      => '',
         'hmac_secret'    => '',
+        'upload_policy'  => 'review', // review=冲突进待审队列；auto=自动接受（历史仍保留）
         'created_at'     => date('c'),
     ];
 }
@@ -309,7 +310,7 @@ function cx_new_token(int $bytes = 24): string
 /**
  * 生成某台设备的清单原文。插件配置原样嵌入，不做 decode/encode。
  */
-function cx_build_manifest(array $device, string $deviceName = ''): string
+function cx_build_manifest(array $device, string $deviceName = '', string $head = ''): string
 {
     $pairs = [];
     foreach (($device['files'] ?? []) as $name => $raw) {
@@ -344,8 +345,12 @@ function cx_build_manifest(array $device, string $deviceName = ''): string
         ];
     }
 
+    $uploadPath = rtrim(dirname($_SERVER['PHP_SELF'] ?? '/index.php'), '/\\') . '/upload.php';
+
     return '{'
         . ($deviceName !== '' ? '"device":' . json_encode($deviceName, JSON_UNESCAPED_UNICODE) . ',' : '')
+        . ($head !== '' ? '"head":' . json_encode($head) . ',' : '')
+        . '"uploadPath":' . json_encode($uploadPath, JSON_UNESCAPED_UNICODE) . ','
         . '"version":' . json_encode($version) . ','
         . '"etag":' . json_encode($etag) . ','
         . '"snapshot":{"pluginConfigs":{' . implode(',', $pairs) . '}},'

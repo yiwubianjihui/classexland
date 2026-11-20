@@ -3,7 +3,12 @@ using ClassExland.Contracts;
 
 namespace ClassExland.Features.Remote;
 
-/// <summary>记录上次成功应用的版本/etag，避免重复应用同一份配置。</summary>
+/// <summary>
+/// 记录上次成功应用的版本/etag，以及双向 diff 所需的两类指纹：
+///  - HeadHash：服务端当前快照的内容哈希（上传时当 base）；
+///  - LocalHashes：上次同步后本机各配置文件的内容哈希（用来发现本地改动）。
+/// 老文件只有 Version/ETag/AppliedAt，缺字段按空处理，升级无感。
+/// </summary>
 public sealed class RemoteStateStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -16,26 +21,97 @@ public sealed class RemoteStateStore
 
     public (string Version, string ETag) Load()
     {
-        try
-        {
-            if (!File.Exists(_path)) return ("", "");
-            var doc = JsonSerializer.Deserialize<StateDoc>(File.ReadAllText(_path), JsonOptions);
-            return (doc?.Version ?? "", doc?.ETag ?? "");
-        }
-        catch
-        {
-            return ("", "");
-        }
+        var doc = Read();
+        return (doc?.Version ?? "", doc?.ETag ?? "");
+    }
+
+    public string LoadHead()
+    {
+        var doc = Read();
+        return doc?.HeadHash ?? "";
     }
 
     /// <summary>上次成功应用的时间；没有记录时返回 null（供设置页展示）。</summary>
     public DateTimeOffset? LoadAppliedAt()
     {
+        var doc = Read();
+        return doc?.AppliedAt == default ? null : doc?.AppliedAt;
+    }
+
+    /// <summary>上次同步后本机各配置文件的内容哈希。</summary>
+    public IReadOnlyDictionary<string, string> LoadLocalHashes()
+    {
+        var doc = Read();
+        return doc?.LocalHashes ?? new Dictionary<string, string>();
+    }
+
+    public (string LastConflict, DateTimeOffset? LastUploadAt) LoadUploadInfo()
+    {
+        var doc = Read();
+        return (doc?.LastConflict ?? "", doc?.LastUploadAt);
+    }
+
+    public bool SaveApplied(string version, string etag, string head = "", IReadOnlyDictionary<string, string>? localHashes = null)
+    {
+        try
+        {
+            var doc = Read() ?? new StateDoc();
+            doc.Version = version;
+            doc.ETag = etag;
+            doc.AppliedAt = DateTimeOffset.Now;
+            if (!string.IsNullOrEmpty(head)) doc.HeadHash = head;
+            if (localHashes is not null) doc.LocalHashes = new Dictionary<string, string>(localHashes);
+            return Write(doc);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool SaveUploaded(string head, IReadOnlyDictionary<string, string> localHashes)
+    {
+        try
+        {
+            var doc = Read() ?? new StateDoc();
+            doc.HeadHash = head;
+            doc.LocalHashes = new Dictionary<string, string>(localHashes);
+            doc.LastUploadAt = DateTimeOffset.Now;
+            doc.LastConflict = "";
+            return Write(doc);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 冲突时记下「这次本地内容已经上报过」，避免每轮轮询都重复入队同一份待审上传。
+    /// 服务端接受/发布新版本后，轮询会发现新版本并重新收敛。
+    /// </summary>
+    public bool SaveConflict(string message, string head = "", IReadOnlyDictionary<string, string>? localHashes = null)
+    {
+        try
+        {
+            var doc = Read() ?? new StateDoc();
+            doc.LastConflict = message.Length > 300 ? message[..300] : message;
+            if (!string.IsNullOrEmpty(head)) doc.HeadHash = head;
+            if (localHashes is not null) doc.LocalHashes = new Dictionary<string, string>(localHashes);
+            return Write(doc);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private StateDoc? Read()
+    {
         try
         {
             if (!File.Exists(_path)) return null;
-            var doc = JsonSerializer.Deserialize<StateDoc>(File.ReadAllText(_path), JsonOptions);
-            return doc?.AppliedAt == default ? null : doc?.AppliedAt;
+            return JsonSerializer.Deserialize<StateDoc>(File.ReadAllText(_path), JsonOptions);
         }
         catch
         {
@@ -43,11 +119,10 @@ public sealed class RemoteStateStore
         }
     }
 
-    public bool SaveApplied(string version, string etag)
+    private bool Write(StateDoc doc)
     {
         try
         {
-            var doc = new StateDoc { Version = version, ETag = etag, AppliedAt = DateTimeOffset.Now };
             var tmp = _path + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(doc, JsonOptions));
             File.Move(tmp, _path, overwrite: true);
@@ -64,5 +139,9 @@ public sealed class RemoteStateStore
         public string Version { get; set; } = "";
         public string ETag { get; set; } = "";
         public DateTimeOffset AppliedAt { get; set; }
+        public string HeadHash { get; set; } = "";
+        public Dictionary<string, string> LocalHashes { get; set; } = new();
+        public DateTimeOffset? LastUploadAt { get; set; }
+        public string LastConflict { get; set; } = "";
     }
 }

@@ -78,7 +78,8 @@
 | `cex layout switch` | 手动切换界面配置（`--to class\|break`） | |
 | `cex config set` | 设置配置项 | **是** |
 | `cex remote sync` | 立即执行一次远程同步 | |
-| `cex remote poll` | 拉取一次快照/指令队列 | |
+| `cex remote poll` | 拉取一次清单，检查新版本与本地变更 | |
+| `cex remote upload` | 把本机四个配置原文整体上传到服务器（冲突时返回待审提示） | |
 | `cex remote enable` | 启用远程同步 | |
 | `cex remote disable` | 停用远程同步 | |
 | `cex remote server` | 设置远程服务器地址 | **是** |

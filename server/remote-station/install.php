@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/lib.php';
+require __DIR__ . '/history.php';
 cx_boot();
 
 if (PHP_SAPI !== 'cli') {
@@ -42,6 +43,7 @@ $first['created_at'] = date('Y-m-d H:i:s');
 $state['devices']['默认设备'] = $first;
 $state['selected'] = '默认设备';
 cx_save_state($state);
+cx_save_history(cx_default_history());
 
 echo json_encode([
     'token'   => $config['api_token'],

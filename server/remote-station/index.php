@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/lib.php';
+require __DIR__ . '/history.php';
 cx_boot();
 
 session_name('cxstation');
@@ -12,11 +13,13 @@ $storageError = '';
 try {
     $config = cx_load_config();
     $state  = cx_load_state();
+    $history = cx_load_history();
 } catch (Throwable $ex) {
     // 存储坏了就别装成「还没初始化」：那样会让人重新 setup，把真实令牌覆盖掉。
     $storageError = $ex->getMessage();
     $config = cx_default_config();
     $state  = cx_default_state();
+    $history = cx_default_history();
 }
 $needsSetup = ($config['admin_password'] === '');
 $loggedIn = !empty($_SESSION['cx_ok']);
@@ -183,6 +186,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $state['devices'][$to] = $dev;
         $state['selected'] = $to;
+        if (!empty($dev['files'])) {
+            cx_commit_snapshot($history, $to, $dev['files'], '复制自「' . $from . '」', '管理员', '');
+            cx_save_history($history);
+        }
         cx_save_state($state);
         cx_log_request('device_clone', 200, $from . ' -> ' . $to);
         cx_redirect('已复制成「' . $to . '」，记得把客户端的设备名也改成它。');
@@ -197,10 +204,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cx_redirect('删除确认不匹配，未执行。请把设备名原样填进确认框。');
         }
         unset($state['devices'][$name]);
+        unset($history['devices'][$name]);
+        cx_gc_blobs($history);
         if (($state['selected'] ?? '') === $name) {
             $state['selected'] = '';
         }
         cx_save_state($state);
+        cx_save_history($history);
         cx_log_request('device_delete', 200, $name);
         cx_redirect('设备「' . $name . '」及其快照已删除。');
     }
@@ -239,16 +249,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cx_redirect('未发布：' . implode('；', $errors));
         }
 
-        $state['devices'][$name]['files'] = $files;
-        $state['devices'][$name]['version'] = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
-        $state['devices'][$name]['updated_at'] = date('Y-m-d H:i:s');
-        $state['devices'][$name]['etag'] = substr(hash('sha256', cx_build_manifest($state['devices'][$name], $name)), 0, 12);
-        $state['selected'] = $name;
-        if (!cx_save_state($state)) {
+        $version = cx_publish_files($state, $name, $files);
+        $parent  = (string)($history['devices'][$name]['head'] ?? '');
+        cx_commit_snapshot($history, $name, $files, (string)($_POST['message'] ?? '管理页发布'), '管理员', $parent);
+        if (!cx_save_state($state) || !cx_save_history($history)) {
             cx_redirect('写入状态失败，请检查 data 目录权限。');
         }
-        cx_log_request('publish', 200, $name . ' version=' . $state['devices'][$name]['version'] . ' files=' . count($files));
-        cx_redirect('已为「' . $name . '」发布版本 ' . $state['devices'][$name]['version'] . '，该设备下次同步即生效。');
+        cx_log_request('publish', 200, $name . ' version=' . $version . ' files=' . count($files));
+        cx_redirect('已为「' . $name . '」发布版本 ' . $version . '，该设备下次同步即生效。');
     }
 
     if ($action === 'command_add') {
@@ -332,6 +340,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         cx_log_request('settings', 200, '');
         cx_redirect('安全设置已保存。改了令牌或密钥后，记得在客户端同步更新。');
     }
+
+    if ($action === 'policy_save') {
+        $policy = (string)($_POST['upload_policy'] ?? 'review');
+        $config['upload_policy'] = $policy === 'auto' ? 'auto' : 'review';
+        if (!cx_save_config($config)) cx_redirect('写入配置失败，请检查 data 目录权限。');
+        cx_log_request('policy', 200, $config['upload_policy']);
+        cx_redirect($config['upload_policy'] === 'auto'
+            ? '上传冲突策略已改为「自动接受」：旧版本仍会留在历史里。'
+            : '上传冲突策略已改为「人工审核」：冲突上传进待审队列，不会覆盖当前快照。');
+    }
+
+    if ($action === 'pending_accept') {
+        $name = cx_device_name((string)($_POST['device'] ?? ''));
+        $id   = (string)($_POST['id'] ?? '');
+        if (!isset($history['devices'][$name]['pending'])) cx_redirect('待审队列不存在。');
+        $target = null;
+        foreach ($history['devices'][$name]['pending'] as $p) {
+            if (hash_equals((string)($p['id'] ?? ''), $id)) { $target = $p; break; }
+        }
+        if ($target === null) cx_redirect('找不到这条待审上传。');
+
+        $files = [];
+        foreach (($target['tree'] ?? []) as $fileName => $hash) {
+            if (isset($history['blobs'][$hash])) $files[$fileName] = $history['blobs'][$hash];
+        }
+        $parent = (string)($history['devices'][$name]['head'] ?? '');
+        $commit = cx_commit_snapshot($history, $name, $files, '采用待审上传：' . (string)($target['message'] ?? ''), '管理员', $parent);
+        cx_publish_files($state, $name, $files);
+        $history['devices'][$name]['pending'] = array_values(array_filter(
+            $history['devices'][$name]['pending'],
+            static fn($p) => (string)($p['id'] ?? '') !== $id
+        ));
+        if (!cx_save_history($history) || !cx_save_state($state)) cx_redirect('写入失败，请检查 data 目录权限。');
+        cx_log_request('pending-accept', 200, $name . ' commit=' . substr($commit['id'], 0, 10));
+        cx_redirect('已采用这次上传，并生成新版本（旧版本仍可回滚）。');
+    }
+
+    if ($action === 'pending_reject') {
+        $name = cx_device_name((string)($_POST['device'] ?? ''));
+        $id   = (string)($_POST['id'] ?? '');
+        $history['devices'][$name]['pending'] = array_values(array_filter(
+            $history['devices'][$name]['pending'] ?? [],
+            static fn($p) => (string)($p['id'] ?? '') !== $id
+        ));
+        if (!cx_save_history($history)) cx_redirect('写入失败，请检查 data 目录权限。');
+        cx_log_request('pending-reject', 200, $name . ' ' . substr($id, 0, 10));
+        cx_redirect('已丢弃这次待审上传，当前快照未改动。');
+    }
+
+    if ($action === 'history_rollback') {
+        $name = cx_device_name((string)($_POST['device'] ?? ''));
+        $id   = (string)($_POST['id'] ?? '');
+        $target = null;
+        foreach ($history['devices'][$name]['commits'] ?? [] as $c) {
+            if (hash_equals((string)($c['id'] ?? ''), $id)) { $target = $c; break; }
+        }
+        if ($target === null) cx_redirect('找不到这个版本。');
+
+        $files = cx_commit_files($history, $target);
+        $parent = (string)($history['devices'][$name]['head'] ?? '');
+        $commit = cx_commit_snapshot($history, $name, $files, '回滚到 ' . substr($id, 0, 10), '管理员', $parent);
+        cx_publish_files($state, $name, $files);
+        if (!cx_save_history($history) || !cx_save_state($state)) cx_redirect('写入失败，请检查 data 目录权限。');
+        cx_log_request('rollback', 200, $name . ' -> ' . substr($id, 0, 10));
+        cx_redirect('已回滚到该版本；这次回滚本身也是一条新提交，可以再滚回来。');
+    }
 }
 
 $flash = (string)($_SESSION['flash'] ?? '');
@@ -346,6 +420,10 @@ if ($selected === '' || !isset($state['devices'][$selected])) {
     $selected = $names[0] ?? '';
 }
 $device = $selected !== '' ? $state['devices'][$selected] : null;
+$devHistory = $history['devices'][$selected] ?? ['head' => '', 'commits' => [], 'pending' => []];
+$commits = array_reverse($devHistory['commits'] ?? []);
+$pendingList = $devHistory['pending'] ?? [];
+$policy = (string)($config['upload_policy'] ?? 'review');
 
 $base = cx_current_url();
 $manifestPath = rtrim(dirname($_SERVER['PHP_SELF']), '/\\') . '/manifest.php';
@@ -550,7 +628,9 @@ $hmac  = (string)$config['hmac_secret'];
         <textarea name="f_<?= cx_h(str_replace(['.', '-'], '_', $key)) ?>"
                   placeholder="留空表示不下发这个文件"><?= cx_h(isset($device['files'][$key]) ? cx_pretty((string)$device['files'][$key]) : '') ?></textarea>
       <?php endforeach; ?>
-      <div class="row"><button class="primary" type="submit">保存并发布到「<?= cx_h($selected) ?>」</button></div>
+        <h3>说明（可选）</h3>
+        <input type="text" name="message" placeholder="这次改了什么，例如：周一值日调整" maxlength="120">
+        <div class="row"><button class="primary" type="submit">保存并发布到「<?= cx_h($selected) ?>」</button></div>
     </form>
   </section>
 
@@ -593,6 +673,96 @@ $hmac  = (string)$config['hmac_secret'];
         <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
         <button class="danger" type="submit">清空队列</button>
       </form>
+    <?php endif; ?>
+  </section>
+
+  <section class="card">
+    <h2>版本历史（<?= cx_h($selected) ?>）</h2>
+    <p class="muted">
+      内容按 SHA-256 存成 blob，相同内容只存一份；每次变更生成一条带 parent 的提交与逐行 diff。
+      当前 tree 哈希：<code><?= cx_h(substr(cx_tree_hash($device['files'] ?? []), 0, 16)) ?>…</code>
+    </p>
+    <?php if (empty($commits)): ?>
+      <p class="muted">还没有提交。客户端上传第一次配置，或在上面「保存并发布」后就会出现。</p>
+    <?php else: ?>
+      <table>
+        <tr><th>时间</th><th>说明</th><th>来源</th><th>tree</th><th></th></tr>
+        <?php foreach (array_slice($commits, 0, 12) as $c): ?>
+          <tr>
+            <td class="muted"><?= cx_h((string)($c['at'] ?? '')) ?></td>
+            <td><?= cx_h((string)($c['message'] ?? '')) ?></td>
+            <td class="muted"><?= cx_h((string)($c['author'] ?? '')) ?></td>
+            <td><code><?= cx_h(substr(cx_tree_hash(cx_commit_files($history, $c)), 0, 8)) ?></code></td>
+            <td>
+              <form method="post" class="inline" onsubmit="return confirm('回滚到这个版本？当前快照会先留一条提交。')">
+                <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
+                <input type="hidden" name="action" value="history_rollback">
+                <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
+                <input type="hidden" name="id" value="<?= cx_h((string)($c['id'] ?? '')) ?>">
+                <button type="submit">回滚</button>
+              </form>
+            </td>
+          </tr>
+          <?php if (!empty($c['diff'])): ?>
+            <tr><td colspan="5">
+              <details>
+                <summary>查看 diff（<?= count($c['diff']) ?> 个文件）</summary>
+                <?php foreach ($c['diff'] as $fileName => $diffText): ?>
+                  <h3><?= cx_h((string)$fileName) ?></h3>
+                  <pre style="background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:8px;overflow:auto;font-size:12px"><?= cx_h((string)$diffText) ?></pre>
+                <?php endforeach; ?>
+              </details>
+            </td></tr>
+          <?php endif; ?>
+        <?php endforeach; ?>
+      </table>
+    <?php endif; ?>
+  </section>
+
+  <section class="card">
+    <h2>客户端上传与冲突</h2>
+    <form method="post" class="inline">
+      <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
+      <input type="hidden" name="action" value="policy_save">
+      <label style="margin:0">冲突策略
+        <select name="upload_policy" style="width:auto;display:inline-block">
+          <option value="review" <?= $policy === 'review' ? 'selected' : '' ?>>人工审核（默认）</option>
+          <option value="auto" <?= $policy === 'auto' ? 'selected' : '' ?>>自动接受（保留历史）</option>
+        </select>
+      </label>
+      <button type="submit">保存策略</button>
+    </form>
+    <p class="muted">客户端每次轮询会比对本地配置哈希：有变化就带着上次看到的 head 上传。head 对不上说明两边都改过——人工审核时进下面的待审队列，服务器当前快照保持不变。</p>
+
+    <?php if (empty($pendingList)): ?>
+      <p class="muted">没有待审冲突。</p>
+    <?php else: ?>
+      <?php foreach ($pendingList as $p): ?>
+        <details open style="border:1px solid var(--warn);border-radius:10px;padding:10px;margin-top:10px">
+          <summary>待审上传 <?= cx_h(substr((string)($p['id'] ?? ''), 0, 10)) ?> · <?= cx_h((string)($p['at'] ?? '')) ?> · base <?= cx_h(substr((string)($p['base'] ?? ''), 0, 8)) ?></summary>
+          <p class="muted"><?= cx_h((string)($p['message'] ?? '')) ?></p>
+          <?php foreach (($p['diff'] ?? []) as $fileName => $diffText): ?>
+            <h3><?= cx_h((string)$fileName) ?></h3>
+            <pre style="background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:8px;overflow:auto;font-size:12px"><?= cx_h((string)$diffText) ?></pre>
+          <?php endforeach; ?>
+          <div class="row">
+            <form method="post" class="inline">
+              <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
+              <input type="hidden" name="action" value="pending_accept">
+              <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
+              <input type="hidden" name="id" value="<?= cx_h((string)($p['id'] ?? '')) ?>">
+              <button class="primary" type="submit">采用这次上传</button>
+            </form>
+            <form method="post" class="inline">
+              <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
+              <input type="hidden" name="action" value="pending_reject">
+              <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
+              <input type="hidden" name="id" value="<?= cx_h((string)($p['id'] ?? '')) ?>">
+              <button class="danger" type="submit">丢弃</button>
+            </form>
+          </div>
+        </details>
+      <?php endforeach; ?>
     <?php endif; ?>
   </section>
   <?php endif; ?>

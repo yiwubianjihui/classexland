@@ -71,8 +71,11 @@
                     <Button x:Name="ButtonSaveTest" Content="保存并测试" Classes="accent" Margin="0,0,8,8"
                             Click="ButtonSaveTest_OnClick" />
                     <Button x:Name="ButtonSync" Content="立即同步" Margin="0,0,8,8" Click="ButtonSync_OnClick" />
+                    <Button x:Name="ButtonUpload" Content="上传当前配置" Margin="0,0,8,8" Click="ButtonUpload_OnClick" />
                     <Button x:Name="ButtonDisable" Content="停用" Margin="0,0,0,8" Click="ButtonDisable_OnClick" />
                 </WrapPanel>
+
+                <TextBlock x:Name="SyncInfoText" Text="" Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
             </StackPanel>
 
             <Separator />
@@ -85,6 +88,11 @@
                 <CheckBox x:Name="SnapshotCheck" Content="同步插件配置（预备铃、值日表、活动、布局）—— 推荐" />
                 <CheckBox x:Name="CommandsCheck" Content="接受远程指令（切换布局、改预备铃、值日表操作）—— 推荐" />
                 <CheckBox x:Name="CoreCheck" Content="同步 ClassIsland 课程表与全局设置" />
+                <CheckBox x:Name="AutoUploadCheck" Content="本地配置有变化时自动上传到服务器（首次会把现有配置整体传上去）" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="轮询间隔（秒，15–3600）" VerticalAlignment="Center" Opacity="0.75" />
+                    <NumericUpDown x:Name="PollIntervalBox" Width="130" Minimum="15" Maximum="3600" Increment="15" Value="60" />
+                </StackPanel>
                 <TextBlock Text="⚠ 最后一项是高风险操作：会用服务器上的版本覆盖本机课程表与设置，只有确实需要统一管理时才勾选。"
                            Foreground="#D9534F" FontSize="12" TextWrapping="Wrap" Margin="24,0,0,0" />
             </StackPanel>
@@ -110,17 +118,21 @@
             <!-- 高级：普通用户不用碰 -->
             <Expander Header="高级选项（一般不用改）">
                 <StackPanel Spacing="8" Margin="0,10,0,0">
-                    <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
+                    <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="清单路径" VerticalAlignment="Center" Margin="0,0,12,8" />
                         <TextBox Grid.Row="0" Grid.Column="1" x:Name="ManifestPathBox" Margin="0,0,0,8"
                                  Watermark="/config/manifest.json" TextChanged="ManifestPathBox_OnTextChanged" />
 
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="签名密钥" VerticalAlignment="Center" Margin="0,0,12,8" />
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="SecretBox" PasswordChar="●" Margin="0,0,0,8"
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="上传路径" VerticalAlignment="Center" Margin="0,0,12,8" />
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="UploadPathBox" Margin="0,0,0,8"
+                                 Watermark="/remote/upload.php" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="签名密钥" VerticalAlignment="Center" Margin="0,0,12,8" />
+                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="SecretBox" PasswordChar="●" Margin="0,0,0,8"
                                  Watermark="可选；管理员要求时才填" />
 
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="超时（秒）" VerticalAlignment="Center" Margin="0,0,12,0" />
-                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TimeoutBox" Width="120" HorizontalAlignment="Left"
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="超时（秒）" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TimeoutBox" Width="120" HorizontalAlignment="Left"
                                  Watermark="15" />
                     </Grid>
 

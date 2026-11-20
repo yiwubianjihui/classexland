@@ -25,6 +25,15 @@ public sealed class RemoteConfig
     /// </summary>
     public string DeviceName { get; set; } = "";
 
+    /// <summary>定期轮询间隔（秒）。每次轮询同时检查服务端新版本与本地变更。</summary>
+    public int PollIntervalSeconds { get; set; } = 60;
+
+    /// <summary>本地配置有变化时自动上传（首次安装也会把现有配置整体传上去）。</summary>
+    public bool AutoUpload { get; set; } = true;
+
+    /// <summary>上传端点路径；留空时按清单路径推导（manifest.php → upload.php）。</summary>
+    public string UploadPath { get; set; } = "/remote/upload.php";
+
     /// <summary>Bearer 令牌，不写进代码。</summary>
     public string BearerToken { get; set; } = "";
 
@@ -52,6 +61,16 @@ public sealed class RemoteConfig
         c.ManifestPath = string.IsNullOrWhiteSpace(c.ManifestPath) ? "/config/manifest.json" : c.ManifestPath.Trim();
         if (!c.ManifestPath.StartsWith('/')) c.ManifestPath = "/" + c.ManifestPath;
         c.DeviceName = SanitizeDeviceName(c.DeviceName);
+        // 老服务端清单里会带正确的 uploadPath；配置里留空/旧值时按清单路径推导一次。
+        if (string.IsNullOrWhiteSpace(c.UploadPath) || c.UploadPath == "/remote/upload.php")
+        {
+            c.UploadPath = c.ManifestPath.EndsWith("manifest.php", StringComparison.OrdinalIgnoreCase)
+                ? c.ManifestPath[..^"manifest.php".Length] + "upload.php"
+                : "/remote/upload.php";
+        }
+        c.UploadPath = c.UploadPath.Trim();
+        if (!c.UploadPath.StartsWith('/')) c.UploadPath = "/" + c.UploadPath;
+        c.PollIntervalSeconds = c.PollIntervalSeconds is < 15 or > 3600 ? 60 : c.PollIntervalSeconds;
         c.BearerToken ??= "";
         c.HmacSecret ??= "";
         c.FetchTimeoutSeconds = c.FetchTimeoutSeconds is < 1 or > 120 ? 15 : c.FetchTimeoutSeconds;

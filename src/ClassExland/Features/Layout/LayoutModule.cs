@@ -17,9 +17,15 @@ namespace ClassExland.Features.Layout;
 /// - PrepareBell / ClassOnNotice → 立即应用上课配置。
 /// - ClassEnd → 延迟 D 秒应用下课配置；若到点宿主仍 OnClass，按 30s 顺延最多 3 次，
 ///   之后放弃并记录日志；期间若又进入上课则取消本次下课。
+///
+/// 另外有一层低频状态对账：开机后若宿主已经处于上课、而 IBellTimeline 因状态残留没发出切换事件，
+/// 单靠事件会一直停在下课布局。这里周期性直读宿主 ILessonsService 的当前状态，
+/// 连续两次确认与当前布局不一致且没有待触发的下课任务时，主动纠正一次。
 /// </summary>
 public sealed class LayoutModule : IHostedService, ILayoutService
 {
+    private enum HostClassState { Unknown, OnClass, Break }
+
     private readonly IBellTimeline _timeline;
     private readonly ILayoutApplier _applier;
     private readonly LayoutConfigStore _store;
@@ -27,7 +33,11 @@ public sealed class LayoutModule : IHostedService, ILayoutService
 
     private readonly object _gate = new();
     private CancellationTokenSource? _breakCts;
+    private CancellationTokenSource? _reconcileCts;
     private string _currentLayout = "";
+    private DateTimeOffset _lastSwitchAt = DateTimeOffset.MinValue;
+    private HostClassState _lastObserved = HostClassState.Unknown;
+    private int _sameObservedCount;
 
     public LayoutModule(
         IBellTimeline timeline,
@@ -71,6 +81,7 @@ public sealed class LayoutModule : IHostedService, ILayoutService
             lock (_gate)
             {
                 if (_currentLayout == desired) return;
+                _lastSwitchAt = DateTimeOffset.Now; // 防抖窗口：刚切完先让状态稳定
             }
 
             var config = _store.Load();
@@ -107,6 +118,10 @@ public sealed class LayoutModule : IHostedService, ILayoutService
             // 但宿主启动瞬间会连续发出多次状态变化，此刻读到的是瞬态（实测午休启动会读到 OnClass），
             // 因此延后一拍，等时间轴稳定后再按真实状态应用。
             if (config.Enabled) _ = ApplyInitialStateDeferredAsync();
+
+            // 低频对账：开机时宿主可能已经上课但时间轴没发出事件，单靠事件会漏切。
+            _reconcileCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _ = Task.Run(() => ReconcileLoopAsync(_reconcileCts.Token), CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -121,6 +136,13 @@ public sealed class LayoutModule : IHostedService, ILayoutService
         {
             _timeline.MomentReached -= OnMomentReached;
             _timeline.VirtualStateChanged -= OnVirtualStateChanged;
+            try
+            {
+                _reconcileCts?.Cancel();
+                _reconcileCts?.Dispose();
+            }
+            catch { /* 忽略 */ }
+            _reconcileCts = null;
             CancelPendingBreak("宿主停止");
             _log.Info("LayoutModule 已停止");
         }
@@ -158,6 +180,107 @@ public sealed class LayoutModule : IHostedService, ILayoutService
         {
             _log.Error($"ApplyInitialState 异常：{ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 开机状态对账循环：前几次间隔短一些（尽快纠正残留布局），之后降到 30 秒一次。
+    /// 只读宿主状态，不改任何配置；真的要切时复用 SwitchToAsync 的幂等逻辑。
+    /// </summary>
+    private async Task ReconcileLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            var ticks = 0;
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    if (_store.Load().Enabled) await ReconcileOnceAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"状态对账异常：{ex.GetType().Name}: {ex.Message}");
+                }
+
+                ticks++;
+                var seconds = ticks <= 6 ? 5 : 30;
+                await Task.Delay(TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 宿主停止，正常退出。
+        }
+    }
+
+    private async Task ReconcileOnceAsync()
+    {
+        var state = ReadHostClassState();
+        if (state == HostClassState.Unknown) return;
+
+        lock (_gate)
+        {
+            // 下课延迟正在倒计时：让它自己走完，别抢在前面切。
+            if (_breakCts is not null) return;
+            if (DateTimeOffset.Now - _lastSwitchAt < TimeSpan.FromSeconds(15)) return;
+
+            if (state != _lastObserved)
+            {
+                _lastObserved = state;
+                _sameObservedCount = 1;
+                return;
+            }
+            _sameObservedCount++;
+            if (_sameObservedCount < 2) return;
+        }
+
+        var desired = state == HostClassState.OnClass ? "class" : "break";
+        string current;
+        lock (_gate) { current = _currentLayout; }
+        if (current == desired) return;
+
+        _log.Info($"状态对账纠正布局：宿主={state}，当前={current}，切到 {desired}");
+        await SwitchToAsync(desired).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 直读宿主当前状态；读不到时退回我方时间轴。None / 反射失败一律当 Unknown，
+    /// 避免开机瞬间的瞬态状态把布局切错。
+    /// </summary>
+    private HostClassState ReadHostClassState()
+    {
+        try
+        {
+            var lessons = HostServiceResolver.TryGet<ILessonsService>();
+            if (lessons is not null)
+            {
+                var type = lessons.GetType();
+                var prop = type.GetProperty("CurrentTimeState", BindingFlags.Public | BindingFlags.Instance)
+                           ?? type.GetProperty("TimeState", BindingFlags.Public | BindingFlags.Instance);
+                if (prop?.GetValue(lessons)?.ToString() is { } text)
+                {
+                    if (text.Contains("OnClass", StringComparison.OrdinalIgnoreCase) ||
+                        text.Contains("PrepareOnClass", StringComparison.OrdinalIgnoreCase))
+                        return HostClassState.OnClass;
+                    if (text.Contains("Breaking", StringComparison.OrdinalIgnoreCase) ||
+                        text.Contains("AfterSchool", StringComparison.OrdinalIgnoreCase))
+                        return HostClassState.Break;
+                    return HostClassState.Unknown;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"读取宿主状态失败：{ex.GetType().Name}: {ex.Message}");
+        }
+
+        return _timeline.VirtualState switch
+        {
+            VirtualTimeState.OnClass or VirtualTimeState.PrepareOnClass => HostClassState.OnClass,
+            VirtualTimeState.Breaking or VirtualTimeState.AfterSchool => HostClassState.Break,
+            _ => HostClassState.Unknown
+        };
     }
 
     private void OnMomentReached(object? sender, BellMoment moment)
@@ -303,33 +426,5 @@ public sealed class LayoutModule : IHostedService, ILayoutService
     /// 读不到时回退到我方的 VirtualState（Harmony 覆盖开启时二者一致）。
     /// 注意：只用于拖堂判定，状态切换本身完全由 IBellTimeline 虚拟状态驱动。
     /// </summary>
-    private bool IsHostStillOnClass()
-    {
-        try
-        {
-            var lessons = HostServiceResolver.TryGet<ILessonsService>();
-            if (lessons is not null)
-            {
-                var type = lessons.GetType();
-                var prop = type.GetProperty("CurrentTimeState", BindingFlags.Public | BindingFlags.Instance)
-                           ?? type.GetProperty("TimeState", BindingFlags.Public | BindingFlags.Instance);
-                if (prop?.GetValue(lessons)?.ToString() is { } stateText)
-                {
-                    if (stateText.Contains("OnClass", StringComparison.OrdinalIgnoreCase) ||
-                        stateText.Contains("PrepareOnClass", StringComparison.OrdinalIgnoreCase))
-                        return true;
-                    if (stateText.Contains("Breaking", StringComparison.OrdinalIgnoreCase) ||
-                        stateText.Contains("AfterSchool", StringComparison.OrdinalIgnoreCase) ||
-                        stateText.Contains("None", StringComparison.OrdinalIgnoreCase))
-                        return false;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.Warn($"读取宿主状态失败，回退虚拟状态：{ex.GetType().Name}: {ex.Message}");
-        }
-
-        return _timeline.VirtualState is VirtualTimeState.OnClass or VirtualTimeState.PrepareOnClass;
-    }
+    private bool IsHostStillOnClass() => ReadHostClassState() == HostClassState.OnClass;
 }

@@ -37,7 +37,7 @@ internal static class CommandCatalog
         "activity.list", "activity.add", "activity.edit", "activity.test",
         "layout.switch", "layout.current",
         "config.get", "config.set", "config.diff", "config.doctor",
-        "remote.status", "remote.sync", "remote.poll", "remote.enable", "remote.disable", "remote.server",
+        "remote.status", "remote.sync", "remote.poll", "remote.upload", "remote.enable", "remote.disable", "remote.server",
         "backup.list", "backup.create", "backup.restore",
         "audit.list", "audit.export",
         "web.start", "web.stop", "web.status",
@@ -212,7 +212,7 @@ internal static class CommandLine
           activity list|add|edit|test
           layout switch|current
           config get|set|diff|doctor
-          remote status|sync|poll|enable|disable|server
+          remote status|sync|poll|upload|enable|disable|server
           backup list|create|restore
           audit list|export
           migrate                      旧插件配置迁移

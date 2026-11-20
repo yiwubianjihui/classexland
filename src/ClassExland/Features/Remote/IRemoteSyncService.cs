@@ -16,4 +16,7 @@ public interface IRemoteSyncService
 
     /// <summary>只拉取清单并检查版本/etag，不应用任何配置。</summary>
     Task<string> PollOnceAsync();
+
+    /// <summary>把本机现有配置整体上传到服务器（零参数反射契约）。</summary>
+    Task<string> UploadNowAsync();
 }

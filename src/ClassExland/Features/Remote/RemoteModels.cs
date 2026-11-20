@@ -14,6 +14,14 @@ public sealed class RemoteManifest
     [JsonPropertyName("etag")]
     public string ETag { get; set; } = "";
 
+    /// <summary>服务端当前快照的内容哈希（tree hash），上传时作为 base 做冲突检测。</summary>
+    [JsonPropertyName("head")]
+    public string Head { get; set; } = "";
+
+    /// <summary>服务端上传端点路径（老版本服务端没有该字段，客户端自行推导）。</summary>
+    [JsonPropertyName("uploadPath")]
+    public string UploadPath { get; set; } = "";
+
     [JsonPropertyName("snapshot")]
     public RemoteSnapshot? Snapshot { get; set; }
 
@@ -81,10 +89,24 @@ public sealed class SyncReport
     public bool Ok { get; set; }
     public string Version { get; set; } = "";
     public string ETag { get; set; } = "";
+    public string Head { get; set; } = "";
+    public bool NeedApply { get; set; }
+    public bool LocalDirty { get; set; }
     public List<string> Notes { get; } = new();
     public List<string> RolledBack { get; } = new();
 
     public void Add(string note) => Notes.Add(note);
+}
+
+/// <summary>本地配置上传结果。</summary>
+public sealed class UploadResult
+{
+    public bool Ok { get; set; }
+    /// <summary>服务端确认冲突、上传内容进入待审队列。</summary>
+    public bool Conflict { get; set; }
+    public string Head { get; set; } = "";
+    public string Message { get; set; } = "";
+    public IReadOnlyList<string> Files { get; set; } = Array.Empty<string>();
 }
 
 public sealed class ApplyFileResult

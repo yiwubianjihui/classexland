@@ -15,6 +15,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/lib.php';
+require __DIR__ . '/history.php';
 cx_boot();
 
 try {
@@ -96,7 +97,8 @@ if (!isset($state['devices'][$deviceName])) {
 }
 
 $device = $state['devices'][$deviceName];
-$body   = cx_build_manifest($device, $deviceName);
+$head   = cx_tree_hash($device['files'] ?? []);
+$body   = cx_build_manifest($device, $deviceName, $head);
 
 $sig = '';
 if (($config['hmac_secret'] ?? '') !== '') {

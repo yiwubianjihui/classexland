@@ -258,21 +258,25 @@
 ```jsonc
 {
   "Enabled": false,
-  "ServerUrl": null,                 // 必须为 https:// 开头；null 表示未配置
-  "PollSeconds": 60,                 // 拉取快照/指令的间隔
-  "TokenEnv": "CLEX_REMOTE_TOKEN",   // 令牌所在的环境变量名
-  "HmacSecretEnv": "CLEX_HMAC_SECRET", // HMAC 密钥所在的环境变量名
-  "Scope": {                         // 同步范围，逐项开关
-    "PluginConfig": true,
-    "ClassIslandProfile": false,     // 高风险，默认关
-    "ClassIslandGlobal": false       // 高风险，默认关
-  },
-  "VerifyTls": true,                 // 不允许关闭证书校验（本地开发除外）
-  "AutoBackup": true,                // 写入前自动备份
-  "RollbackOnFailure": true,         // 校验/签名失败或中途错误时回滚
-  "Audit": true                      // 记录同步审计日志
+  "ServerUrl": "",                   // 必须 https:// 开头；空表示未配置
+  "ManifestPath": "/remote/manifest.php",
+  "UploadPath": "/remote/upload.php",// 留空时按清单路径推导（manifest.php → upload.php）
+  "DeviceName": "初一2班",            // 同一服务器按名字区分设备；留空时仅单设备可用
+  "BearerToken": "",                 // 管理员给的令牌；不写进代码
+  "HmacSecret": "",                  // 可选；配了就对响应原文与上传请求体双向签名
+  "FetchTimeoutSeconds": 15,
+  "PollIntervalSeconds": 60,         // 周期轮询：先查服务端新版本，再查本地变更并上传
+  "AutoUpload": true,                // 本地四个配置有变化时自动上传
+  "EnableSnapshotSync": true,        // 是否应用服务端下发的插件配置快照
+  "EnableCoreConfigSync": false,     // 高风险：课程表 Settings.json / Profiles
+  "EnableCommandQueue": true,        // 是否执行服务端下发的指令
+  "Loopback": { "Enabled": false, "Port": 18765, "Token": "" }
 }
 ```
+
+字段名大小写按实际 JSON 原样写；`remote.json` 由插件自己的 `RemoteConfigStore` 读写，
+不受值日表那套混合大小写规则影响。上次应用的版本、服务端 head 与本地文件指纹记在
+`remote-state.json`（自动生成，别手改）。
 
 ---
 

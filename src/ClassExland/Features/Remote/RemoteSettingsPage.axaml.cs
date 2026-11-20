@@ -59,6 +59,9 @@ public partial class RemoteSettingsPage : SettingsPageBase
             ServerUrlBox.Text = cfg.ServerUrl;
             DeviceBox.Text = cfg.DeviceName;
             ManifestPathBox.Text = cfg.ManifestPath;
+            UploadPathBox.Text = cfg.UploadPath;
+            AutoUploadCheck.IsChecked = cfg.AutoUpload;
+            PollIntervalBox.Value = cfg.PollIntervalSeconds;
             TokenBox.Text = cfg.BearerToken;
             SecretBox.Text = cfg.HmacSecret;
             TimeoutBox.Text = cfg.FetchTimeoutSeconds.ToString();
@@ -195,6 +198,15 @@ public partial class RemoteSettingsPage : SettingsPageBase
                 ? $"上次成功同步：{t.LocalDateTime:yyyy-MM-dd HH:mm}" +
                   (string.IsNullOrEmpty(version) ? "" : $"（版本 {version}）")
                 : "还没有成功同步过。";
+
+            var head = _state.LoadHead();
+            var (conflict, uploadedAt) = _state.LoadUploadInfo();
+            var bits = new List<string>();
+            if (!string.IsNullOrEmpty(head)) bits.Add("head " + head[..Math.Min(10, head.Length)]);
+            if (uploadedAt is { } u) bits.Add($"上次上传 {u.LocalDateTime:MM-dd HH:mm}");
+            bits.Add(cfg.AutoUpload ? $"自动上传开（每 {cfg.PollIntervalSeconds}s 轮询）" : "自动上传关");
+            if (!string.IsNullOrEmpty(conflict)) bits.Add("⚠ " + conflict);
+            SyncInfoText.Text = string.Join(" · ", bits);
         }
         catch (Exception ex)
         {
@@ -242,6 +254,11 @@ public partial class RemoteSettingsPage : SettingsPageBase
         cfg.ManifestPath = string.IsNullOrWhiteSpace(ManifestPathBox.Text)
             ? "/config/manifest.json"
             : ManifestPathBox.Text!.Trim();
+        cfg.UploadPath = string.IsNullOrWhiteSpace(UploadPathBox.Text)
+            ? "/remote/upload.php"
+            : UploadPathBox.Text!.Trim();
+        cfg.AutoUpload = AutoUploadCheck.IsChecked == true;
+        cfg.PollIntervalSeconds = (int)Math.Clamp(PollIntervalBox.Value ?? 60, 15, 3600);
         cfg.BearerToken = TokenBox.Text?.Trim() ?? "";
         cfg.HmacSecret = SecretBox.Text?.Trim() ?? "";
         cfg.FetchTimeoutSeconds = Math.Clamp(ParseInt(TimeoutBox.Text, 15), 1, 120);
@@ -324,6 +341,34 @@ public partial class RemoteSettingsPage : SettingsPageBase
         }
     }
 
+    private async void ButtonUpload_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!SaveFromUi(forceEnabled: true)) return;
+
+            var cfg = _store.Load();
+            if (!cfg.CanSync())
+            {
+                StatusText.Text = "已保存，但还不能上传：服务器地址要以 https:// 开头，访问令牌不能为空。";
+                return;
+            }
+
+            SetBusy(true, "正在上传本机配置…");
+            var raw = await _sync.UploadNowAsync();
+            StatusText.Text = DescribeResult(raw, syncing: true);
+            UpdateStatusCard();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"上传失败：{ex.Message}";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private void ButtonDisable_OnClick(object? sender, RoutedEventArgs e)
     {
         try
@@ -345,6 +390,8 @@ public partial class RemoteSettingsPage : SettingsPageBase
     {
         ButtonSaveTest.IsEnabled = !busy;
         ButtonSync.IsEnabled = !busy;
+        ButtonUpload.IsEnabled = !busy;
+        ButtonFetchDevices.IsEnabled = !busy;
         ButtonDisable.IsEnabled = !busy;
         if (hint != null) StatusText.Text = hint;
     }
@@ -450,11 +497,13 @@ public partial class RemoteSettingsPage : SettingsPageBase
         sb.AppendLine($"启用：{cfg.Enabled}，可同步：{cfg.CanSync()}");
         sb.AppendLine($"服务器：{(string.IsNullOrEmpty(cfg.ServerUrl) ? "未填" : cfg.ServerUrl)}");
         sb.AppendLine($"设备名称：{(string.IsNullOrEmpty(cfg.DeviceName) ? "（未指定）" : cfg.DeviceName)}");
-        sb.AppendLine($"清单路径：{cfg.ManifestPath}");
+        sb.AppendLine($"清单路径：{cfg.ManifestPath}；上传路径：{cfg.UploadPath}");
+        sb.AppendLine($"轮询：每 {cfg.PollIntervalSeconds}s；自动上传：{cfg.AutoUpload}");
         sb.AppendLine($"访问令牌：{(string.IsNullOrEmpty(cfg.BearerToken) ? "未填" : $"已填（{cfg.BearerToken.Length} 字符）")}");
         sb.AppendLine($"签名密钥：{(string.IsNullOrEmpty(cfg.HmacSecret) ? "未填" : "已填")}");
         sb.AppendLine($"同步范围：快照={cfg.EnableSnapshotSync} 核心配置={cfg.EnableCoreConfigSync} 指令={cfg.EnableCommandQueue}");
-        sb.AppendLine($"上次已应用：版本 {version}，etag {etag}");
+        sb.AppendLine($"上次已应用：版本 {version}，etag {etag}，head {_state.LoadHead()}");
+        sb.AppendLine($"上传冲突：{(string.IsNullOrEmpty(_state.LoadUploadInfo().LastConflict) ? "无" : _state.LoadUploadInfo().LastConflict)}");
         sb.AppendLine($"本机网页控制台：{(_web?.IsRunning == true ? _web.Url : "未启动")}");
         sb.AppendLine($"配置文件：{_paths.Get(ConfigFiles.Remote)}");
         sb.AppendLine($"审计日志：{_paths.AuditLogPath}");
@@ -496,6 +545,14 @@ public partial class RemoteSettingsPage : SettingsPageBase
             var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
                 ? m.GetString() ?? ""
                 : "";
+
+            // 上传结果单独说人话：冲突不是「失败」，是服务器把两边都留着等审核。
+            if (root.TryGetProperty("conflict", out var conflictEl))
+            {
+                return conflictEl.ValueKind == JsonValueKind.True
+                    ? "⚠ " + Explain(message)
+                    : "✅ " + message;
+            }
 
             if (ok)
             {

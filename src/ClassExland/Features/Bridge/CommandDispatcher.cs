@@ -113,6 +113,7 @@ public sealed partial class CommandDispatcher : ICommandDispatcher
             CommandNames.Config.Set => WriteConfigSetAsync(r, ct),
             CommandNames.Remote.Sync => WriteRemoteSyncAsync(r, ct),
             CommandNames.Remote.Poll => WriteRemotePollAsync(r, ct),
+            CommandNames.Remote.Upload => WriteRemoteUploadAsync(r, ct),
             CommandNames.Remote.Enable => WriteRemoteToggleAsync(r, ct, true),
             CommandNames.Remote.Disable => WriteRemoteToggleAsync(r, ct, false),
             CommandNames.Remote.Server => WriteRemoteServerAsync(r, ct),

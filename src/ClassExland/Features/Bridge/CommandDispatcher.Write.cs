@@ -385,6 +385,24 @@ public sealed partial class CommandDispatcher
             : Fail(ExitCodes.Validation, $"轮询失败：{ReadStringKey(detail, "message")}", detail);
     }
 
+    private async Task<CommandResult> WriteRemoteUploadAsync(CommandRequest r, CancellationToken ct)
+    {
+        if (!r.Apply) return Preview(new { action = "remote upload (上传本机现有配置)" });
+        var svc = TryResolveInterface("ClassExland.Features.Remote.IRemoteSyncService");
+        // 零参数反射契约：Task<string> UploadNowAsync()
+        var result = await TryInvokeAsync(svc, "UploadNowAsync", Array.Empty<object?>(), ct).ConfigureAwait(false);
+        if (result is null)
+            return Fail(ExitCodes.IpcUnavailable, "远程同步服务不可用");
+
+        var detail = TryParseJsonSummary(result);
+        var ok = ReadBoolKey(detail, "ok") ?? true;
+        var conflict = ReadBoolKey(detail, "conflict") ?? false;
+        return ok
+            ? Ok(new { uploaded = true, detail })
+            : Fail(ExitCodes.Validation,
+                (conflict ? "上传冲突（已进入服务器待审队列）：" : "上传失败：") + ReadStringKey(detail, "message"), detail);
+    }
+
     /// <summary>把服务返回的 JSON 摘要字符串解析为 JsonElement，失败则回退为原始字符串。</summary>
     private static object TryParseJsonSummary(object? value)
     {

@@ -13,7 +13,7 @@ namespace ClassExland.Features.Remote;
 /// 绝不阻塞宿主启动。支持：完整快照 + 指令队列、HTTPS + Bearer + 可选 HMAC、
 /// 版本/etag 去重、整份备份、校验失败/下载失败自动回滚、审计、一键停用。
 /// </summary>
-public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
+public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncService
 {
     private readonly RemoteConfigStore _configStore;
     private readonly RemoteStateStore _state;
@@ -74,7 +74,13 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                         LastRunAt = _lastRunAt,
                         Busy = _busy,
                         LastOk = _lastReport?.Ok,
-                        LastMessage = _lastReport?.Notes.Count > 0 ? _lastReport.Notes[^1] : ""
+                        LastMessage = _lastReport?.Notes.Count > 0 ? _lastReport.Notes[^1] : "",
+                        AutoUpload = cfg.AutoUpload,
+                        PollIntervalSeconds = cfg.PollIntervalSeconds,
+                        HeadHash = _state.LoadHead(),
+                        LocalDirty = _lastReport?.LocalDirty ?? false,
+                        LastConflict = _state.LoadUploadInfo().LastConflict,
+                        LastUploadAt = _state.LoadUploadInfo().LastUploadAt
                     };
                 }
             }
@@ -172,6 +178,8 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             var token = _lifetime.Token;
             // 后台任务 + 超时：不在启动路径做阻塞网络请求。
             _ = Task.Run(() => SyncOnceAsync(cfg, token), CancellationToken.None);
+            // 之后按配置周期轮询：先检查服务端新版本，再检查本地变更并上传。
+            _ = Task.Run(() => RunPollLoopAsync(token), CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -239,6 +247,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             var manifest = JsonSerializer.Deserialize<RemoteManifest>(raw) ?? new RemoteManifest();
             report.Version = manifest.Version;
             report.ETag = manifest.ETag;
+            report.Head = manifest.Head;
 
             // 2) 可选 HMAC-SHA256 签名校验。
             //    优先用响应头 X-ClassExland-Signature：它对响应原文直接签名，服务端用任何语言都好实现
@@ -343,8 +352,11 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                 }
             }
 
-            // 8) 记录版本，完成
-            _state.SaveApplied(manifest.Version, manifest.ETag);
+            // 8) 记录版本与本地指纹，完成。
+            //    这里记的是「应用完之后磁盘上的真实内容」：首次安装时服务端快照可能是空的，
+            //    本机已有的配置会因此被识别为新变更，在下一次轮询里整体上传。
+            var localHashes = RemoteLocalSnapshot.HashAll(_paths);
+            _state.SaveApplied(manifest.Version, manifest.ETag, manifest.Head, localHashes);
             report.Ok = true;
             _audit.Log("applied", $"version={manifest.Version} etag={manifest.ETag}", ok: true);
             return report;
@@ -404,6 +416,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             var manifest = JsonSerializer.Deserialize<RemoteManifest>(raw) ?? new RemoteManifest();
             report.Version = manifest.Version;
             report.ETag = manifest.ETag;
+            report.Head = manifest.Head;
 
             if (!string.IsNullOrEmpty(cfg.HmacSecret)
                 && !VerifySignature(raw, headerSignature, manifest.Signature, cfg.HmacSecret))
@@ -418,6 +431,9 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
             var upToDate = !string.IsNullOrEmpty(manifest.Version)
                            && manifest.Version == lastVersion && manifest.ETag == lastETag;
             report.Ok = true;
+            report.NeedApply = !upToDate;
+            var localHashes = RemoteLocalSnapshot.HashAll(_paths);
+            report.LocalDirty = RemoteLocalSnapshot.HasChanges(_state.LoadLocalHashes(), localHashes);
             report.Add(upToDate
                 ? $"已是最新版本 {manifest.Version}"
                 : $"发现新版本 {manifest.Version}（本地 {lastVersion}），可执行 remote.sync");
@@ -586,7 +602,7 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
     /// </summary>
     private static async Task<string> DescribeHttpFailureAsync(HttpResponseMessage resp, CancellationToken ct)
     {
-        if ((int)resp.StatusCode is not (400 or 401 or 403 or 404)) return "";
+        if ((int)resp.StatusCode is not (400 or 401 or 403 or 404 or 409 or 429 or 503)) return "";
 
         try
         {
@@ -613,6 +629,9 @@ public sealed class RemoteSyncModule : IHostedService, IRemoteSyncService
                 "unknown_device" => devices.Length > 0
                     ? $"（设备名不存在，可选：{devices}）"
                     : "（设备名不存在）",
+                "conflict" => "（本地与服务器版本分叉，上传已进入服务器待审队列）",
+                "too_many_devices" => "（服务器设备数已达上限）",
+                "station_storage_error" => "（服务器数据文件不可读，请让管理员检查权限）",
                 null => "",
                 _ => $"（{error}）"
             };

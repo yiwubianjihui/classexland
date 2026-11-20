@@ -56,6 +56,7 @@ public static class CommandNames
         public const string Status = "remote.status";
         public const string Sync = "remote.sync";
         public const string Poll = "remote.poll";
+        public const string Upload = "remote.upload";
         public const string Enable = "remote.enable";
         public const string Disable = "remote.disable";
         public const string Server = "remote.server";
