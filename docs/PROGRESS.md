@@ -321,3 +321,8 @@ php-fpm 读不到 → `file_get_contents` 失败 → 当时 `cx_load_state()` �
 
 构建 0 错误、单测 56/56（新增 `DutySlotLabelsTests` 11 例 + `RemoteDeviceNameTests` 3 例）、
 `ClassExland.cipx` 288669 B；实机 DLL 与 `cex` 已换 1.0.0.6（旧版备份 `artifacts/backup-1.0.0.5.dll`）。
+
+> 补记（同日 23:26）：多设备还差一块拼图——老师得手打中文设备名，很容易打成「初一２班」（全角）
+> 或在末尾多一个空格，服务端就当成新设备自动登记，列表里堆一堆空设备。
+> 于是 1.0.0.7 补了「从服务器读取设备列表」：`GET /manifest.php?list=1`（Bearer 鉴权）
+> 只回名字/备注/版本/最近拉取时间，设置页一个下拉选中即回填。设备多时也能一眼看出哪台还没发布过。
