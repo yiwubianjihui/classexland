@@ -113,5 +113,5 @@ dotnet build ClassExland.sln -c Release
 ## 文档
 
 - [设计稿](docs/DESIGN.md) · [决策记录](docs/DECISIONS.md) · [进度](docs/PROGRESS.md) · [任务清单](TODO.md)
-- [配置说明](docs/CONFIGURATION.md) · [旧插件迁移](docs/MIGRATION.md) · [远程同步](docs/REMOTE-SYNC.md) · [LuckyPicker 联动](docs/LUCKY-PICKER.md) · [CLI 参考](docs/CLI.md)
+- [配置说明](docs/CONFIGURATION.md) · [旧插件迁移](docs/MIGRATION.md) · [远程同步](docs/REMOTE-SYNC.md) · [LuckyPicker 联动](docs/LUCKY-PICKER.md) · [配置持久化](docs/CONFIG-PERSISTENCE.md) · [CLI 参考](docs/CLI.md)
 - [更新日志](CHANGELOG.md) · [贡献指南](docs/CONTRIBUTING.md)

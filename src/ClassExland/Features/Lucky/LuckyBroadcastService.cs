@@ -36,6 +36,11 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
     private readonly object _gate = new();
     private readonly HashSet<string> _known = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pushedIds = new(StringComparer.Ordinal);
+    /// <summary>推送后这段时间内，轮询不再把同一条当新记录（吸收 history.json 写入时间差）。</summary>
+    private const int SuppressSeconds = 8;
+    private DateTime _suppressUntil = DateTime.MinValue;
+    /// <summary>刚推送过的人名；轮询据此跳过对应记录，避免「抽一次播两次」。</summary>
+    private readonly HashSet<string> _suppressNames = new(StringComparer.Ordinal);
     private bool _primed;
     private DateTime _lastPollAt = DateTime.MinValue;
     private string _lastHash = "";
@@ -118,13 +123,17 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
                 if (!string.IsNullOrWhiteSpace(id) && !_pushedIds.Add(id))
                     return "该抽选已广播过（id 重复）";
                 if (_pushedIds.Count > 200) _pushedIds.Clear();
+
+                // 压制窗口：刚推来的这条，轮询在 8 秒内不再判为新记录。
+                // 光靠 _known 不行——推送时还拿不到 history.json 里那条记录的 time，
+                // 指纹与轮询算出来的不一致，下一拍就会被当作新记录再播一次（抽一次播两次）。
+                _suppressUntil = DateTime.Now.AddSeconds(SuppressSeconds);
+                _suppressNames.Clear();
+                foreach (var n in LuckyHistory.ExtractNames(namesText)) _suppressNames.Add(n);
             }
 
             var cfg = _store.Load();
             Broadcast(cfg, namesText.Trim());
-            // 推送成功后把这条记录也计入"已见"，避免下一拍轮询再播一遍。
-            foreach (var n in LuckyHistory.ExtractNames(namesText))
-                _known.Add(LuckyHistory.Fingerprint(new LuckyHistoryEntry { Time = "", Text = n }));
             await Task.CompletedTask;
             return "已广播：" + namesText.Trim();
         }
@@ -192,7 +201,21 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
         List<LuckyHistoryEntry> fresh;
         lock (_gate)
         {
-            fresh = LuckyHistory.FindNew(entries, _known, skipAllWhenEmpty: !_primed && cfg.SkipExistingOnStart).ToList();
+            var candidates = LuckyHistory.FindNew(entries, _known, skipAllWhenEmpty: !_primed && cfg.SkipExistingOnStart).ToList();
+
+            // 推送刚播过的记录：这一拍跳过，否则同一次抽选会播两遍。
+            // 按人名剔除，不误伤同一时刻产生的其他抽选。
+            if (DateTime.Now < _suppressUntil && _suppressNames.Count > 0)
+            {
+                candidates = candidates.Where(e =>
+                {
+                    var ns = LuckyHistory.ExtractNames(e.Text);
+                    return !(ns.Count > 0 && ns.All(_suppressNames.Contains));
+                }).ToList();
+            }
+            if (DateTime.Now >= _suppressUntil) _suppressNames.Clear();
+
+            fresh = candidates;
 
             // 首次读到文件时把已有记录全部标记为"已见"，避免开机把整本历史广播一遍。
             foreach (var e in entries) _known.Add(LuckyHistory.Fingerprint(e));
@@ -248,10 +271,13 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
             var maskDuration = TimeSpan.FromSeconds(cfg.MaskDurationSeconds);
             var overlayDuration = TimeSpan.FromSeconds(cfg.OverlayDurationSeconds);
 
-            var request = new NotificationRequest
+            // 不发 MaskContent：它是盖在窗口顶部的大块遮罩，摇人频率一高就很吵，还挡课表。
+            // 只发 OverlayContent（正文「抽到了…」），到点自动消失，不挡主界面。
+            // 想让横幅也出现时，把 EnableMask 打开即可（人名显示在横幅上）。
+            NotificationContent? mask = null;
+            if (cfg.EnableMask)
             {
-                // 遮罩 = 人名本身，字号由宿主模板决定，一眼就能看清抽到谁。
-                MaskContent = NotificationContent.CreateTwoIconsMask(
+                mask = NotificationContent.CreateTwoIconsMask(
                     maskText,
                     leftIcon: cfg.MaskLeftIcon,
                     rightIcon: cfg.MaskRightIcon,
@@ -260,10 +286,19 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
                     {
                         x.Duration = maskDuration;
                         x.SpeechContent = cfg.EnableSpeech ? overlayText : null;
-                    }),
+                    });
+            }
+
+            var request = new NotificationRequest
+            {
+                MaskContent = mask,
                 OverlayContent = NotificationContent.CreateSimpleTextContent(
                     overlayText,
-                    x => x.Duration = overlayDuration)
+                    x =>
+                    {
+                        x.Duration = overlayDuration;
+                        if (mask is null && cfg.EnableSpeech) x.SpeechContent = overlayText;
+                    })
             };
 
             // 先关上一条，避免叠在一起占满空间。
@@ -272,7 +307,7 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
             _active = request;
             _activeCloseAt = DateTime.Now + overlayDuration + CloseGrace;
             ShowNotification(request);
-            _logger.LogInformation("已广播 LuckyPicker 抽选：{Mask} / {Overlay}", maskText, overlayText);
+            _logger.LogInformation("已广播 LuckyPicker 抽选：{Overlay}", overlayText);
         }
         catch (Exception ex)
         {

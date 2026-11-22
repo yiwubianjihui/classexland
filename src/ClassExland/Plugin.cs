@@ -21,6 +21,13 @@ public class Plugin : PluginBase
         var paths = new PluginPaths(PluginConfigFolder);
         services.AddSingleton<IPluginPaths>(paths);
 
+        // 配置持久化保障：必须在任何配置类被解析之前跑，
+        // 这样即使上一轮运行把某个 json 写坏了（空文件/非法 JSON），
+        // 也是先从快照补回来，再让各模块去读——而不是让模块拿默认值覆盖用户配置。
+        var guard = new ConfigSnapshotGuard(paths);
+        guard.EnsureHealthy();
+        services.AddSingleton(guard);
+
         services.AddBell();
         services.AddDuty();
         services.AddLayout();

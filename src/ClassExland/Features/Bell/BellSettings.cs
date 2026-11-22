@@ -307,20 +307,31 @@ public sealed partial class BellSettings : ObservableRecipient
 
     private void Load()
     {
+        var hadSlots = File.Exists(_path);
+        var hadOptions = File.Exists(_optionsPath);
+        var ok = true;
+
         try
         {
             LoadSlots();
             LoadOptions();
         }
-        catch
+        catch (Exception ex)
         {
-            // 配置损坏时保留默认值，不让插件因配置问题崩溃或被禁用。
+            ok = false;
+            // 不写日志也不落盘：读失败就保留默认值，下次启动重试，绝不覆盖用户的文件。
         }
         finally
         {
             _loaded = true;
         }
-        Save();
+
+        // 关键：只有「文件本来就不存在」时才落一份模板。
+        // 以前这里无条件 Save()，等于每次启动都拿内存里的值回写磁盘——
+        // 一旦某次读取失败（或文件被清成 []），就会把真实配置永久冲成默认值，
+        // 用户看到的就是"每次更新都重置了配置"。
+        if (!ok) return;
+        if (!hadSlots || !hadOptions) Save();
     }
 
     private void LoadSlots()
