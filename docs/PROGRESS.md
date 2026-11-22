@@ -518,3 +518,24 @@ System.InvalidOperationException: Call from invalid thread
 
 验证：构建 0 错误、单测 **105/105**（新增 5 例快照/恢复测试）；
 实机 DLL 已换 1.0.0.14（md5 `DCB2CF59…`，宿主运行中用改名法替换，重启生效）。
+
+## 2026-11-22 22:50 · 1.0.0.15（修复广播崩溃 —— 我上一版引入的 NRE）
+
+用户贴出宿主崩溃栈。日志给出了决定性证据：
+
+```
+处理通知请求：(null) NotificationContent{...SimpleTextTemplateData(抽到了：范炳政)}
+Critical 发生严重错误
+NullReferenceException at MainWindowLine.PreProcessNotificationContent line 660
+```
+
+`(null)` 那个位置就是 `MaskContent`。1.0.0.14 为了"取消全屏遮罩"把它传成了 null，
+而宿主的 `PreProcessNotificationContent` 会**无条件解引用**——于是每次广播都崩宿主。
+这是我上一轮改动引入的回归，不是用户环境问题。
+
+修复：`MaskContent` 始终给非空对象；横幅默认只闪现约 1 秒（`EnableMask=false`）就退场，
+正文照常，观感上不挡课表。`_activeCloseAt` 按横幅/正文里较长的那个算，先退横幅再收正文。
+补一条测试锁住"横幅默认不是完整时长"这个约定，并核对项目里另外三处 NotificationRequest
+（Bell / Duty 两处）都是直接构造、本就不会为 null。
+
+构建 0 错误、单测 106/106；实机 DLL 已换 1.0.0.15（md5 `263B4B9F…`），宿主当时已退出，直接生效。

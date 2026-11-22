@@ -268,26 +268,24 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
     {
         try
         {
-            var maskDuration = TimeSpan.FromSeconds(cfg.MaskDurationSeconds);
             var overlayDuration = TimeSpan.FromSeconds(cfg.OverlayDurationSeconds);
+            // 横幅只有 1 秒左右就退场：宿主的 MainWindowLine 会无条件解引用 MaskContent，
+            // 传 null 会直接抛 NullReferenceException（22:43 那次崩溃就是这么来的）。
+            // 所以这里始终给一个短横幅，观感上"一闪而过"，不挡课表。
+            var maskDuration = cfg.EnableMask
+                ? TimeSpan.FromSeconds(cfg.MaskDurationSeconds)
+                : TimeSpan.FromSeconds(1);
 
-            // 不发 MaskContent：它是盖在窗口顶部的大块遮罩，摇人频率一高就很吵，还挡课表。
-            // 只发 OverlayContent（正文「抽到了…」），到点自动消失，不挡主界面。
-            // 想让横幅也出现时，把 EnableMask 打开即可（人名显示在横幅上）。
-            NotificationContent? mask = null;
-            if (cfg.EnableMask)
-            {
-                mask = NotificationContent.CreateTwoIconsMask(
-                    maskText,
-                    leftIcon: cfg.MaskLeftIcon,
-                    rightIcon: cfg.MaskRightIcon,
-                    hasRightIcon: !string.IsNullOrEmpty(cfg.MaskRightIcon),
-                    factory: x =>
-                    {
-                        x.Duration = maskDuration;
-                        x.SpeechContent = cfg.EnableSpeech ? overlayText : null;
-                    });
-            }
+            // MaskContent 必须非 null —— 这是宿主 API 的硬性前提。
+            var mask = NotificationContent.CreateTwoIconsMask(
+                maskText,
+                leftIcon: cfg.MaskLeftIcon,
+                rightIcon: cfg.MaskRightIcon,
+                hasRightIcon: !string.IsNullOrEmpty(cfg.MaskRightIcon),
+                factory: x =>
+                {
+                    x.Duration = maskDuration;
+                });
 
             var request = new NotificationRequest
             {
@@ -297,7 +295,7 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
                     x =>
                     {
                         x.Duration = overlayDuration;
-                        if (mask is null && cfg.EnableSpeech) x.SpeechContent = overlayText;
+                        if (cfg.EnableSpeech) x.SpeechContent = overlayText;
                     })
             };
 
@@ -305,7 +303,8 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
             CloseActive();
 
             _active = request;
-            _activeCloseAt = DateTime.Now + overlayDuration + CloseGrace;
+            // 关闭时机按两者里较长的那个算，横幅先退、正文后收。
+            _activeCloseAt = DateTime.Now + (overlayDuration > maskDuration ? overlayDuration : maskDuration) + CloseGrace;
             ShowNotification(request);
             _logger.LogInformation("已广播 LuckyPicker 抽选：{Overlay}", overlayText);
         }

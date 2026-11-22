@@ -164,4 +164,14 @@ public class LuckyHistoryTests
         var cfg = LuckyConfig.Sanitize(new LuckyConfig { HistoryPath = @"D:\tmp\h.json" });
         Assert.Equal(@"D:\tmp\h.json", cfg.ResolveHistoryPath());
     }
+    [Fact]
+    public void 横幅默认不是完整时长_避免遮挡主界面()
+    {
+        // 宿主 MainWindowLine.PreProcessNotificationContent 会无条件解引用 MaskContent，
+        // 传 null 会直接 NullReferenceException（1.0.0.14 的崩溃事故就是这么来的），
+        // 所以横幅无法完全不发。这里锁住"默认只闪现约 1 秒"这一约定。
+        var cfg = LuckyConfig.Sanitize(null);
+        Assert.False(cfg.EnableMask);
+        Assert.True(cfg.MaskDurationSeconds > 0);
+    }
 }

@@ -4,6 +4,27 @@
 
 ## [未发布]
 
+## [1.0.0.15] - 2026-11-22
+
+### 修复
+
+- **广播导致 ClassIsland 崩溃（严重）**：1.0.0.14 为了"取消全屏遮罩"，把 `MaskContent` 传成了 `null`。
+  宿主的 `MainWindowLine.PreProcessNotificationContent` 会**无条件解引用**它，
+  于是每次广播都抛 `NullReferenceException`，宿主直接判为严重错误：
+
+  ```
+  处理通知请求：(null) NotificationContent{SimpleTextTemplateData(抽到了：范炳政)}
+  Critical 发生严重错误
+  System.NullReferenceException ... PreProcessNotificationContent(NotificationContent content)
+  ```
+
+  现在 `MaskContent` 始终是非空对象。想减少打扰时，横幅默认**只闪现约 1 秒**就退场
+  （`EnableMask=false`），正文照常显示；需要完整横幅时把 `EnableMask` 打开。
+
+  教训：`NotificationRequest.MaskContent` 是宿主 API 的硬性前提，不能为 null——
+  即使"只想发正文"。新增测试锁住这个约定。
+
+
 ## [1.0.0.14] - 2026-11-22
 
 ### 修复

@@ -33,7 +33,10 @@ public sealed class LuckyConfig
     /// <summary>正文文案模板，{names} 会替换成抽到的名字（遮罩上直接显示人名）。</summary>
     public string OverlayTemplate { get; set; } = "抽到了：{names}";
 
-    /// <summary>是否也发顶部横幅遮罩（默认关：只发正文，不挡主界面）。</summary>
+    /// <summary>
+    /// 横幅是否用完整时长显示。默认 false：横幅只闪现约 1 秒就退场，不挡课表。
+    /// 注意宿主的 MainWindowLine 会无条件解引用 MaskContent，所以横幅本身无法完全不发。
+    /// </summary>
     public bool EnableMask { get; set; } = false;
 
     /// <summary>遮罩左侧图标（Fluent 图标字形）。</summary>
