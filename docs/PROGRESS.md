@@ -363,3 +363,29 @@ E2E 用临时设备验证：首次上传 200、清单出现文件、签名逐字
 > 所以管理页新界面的目视验收要等下一个开放窗口。服务端代码已经在开放时段内部署并验证过。
 > 本机 shell 进程创建在 01:20 后异常（CreateProcess 访问冲突），构建/测试/推送都改走 WMI 启动 .bat
 > （ASCII 路径联接 `D:\cx\repo` → `D:\工作区\projects\class-exland`）完成。
+
+## 2026-11-22 12:40 · 1.0.0.9（撤掉远程设置页 + 定向命令下发）
+
+用户两点：① 远程控制界面在教室里容易被同学误操作，删掉界面只留设置文件；
+② 希望能直接对特定设备发送特定命令。
+
+**① 设置页移除。**
+删除 `RemoteSettingsPage.axaml(.cs)` 与 `AddSettingsPage<RemoteSettingsPage>()`。
+插件在 ClassIsland 设置里不再出现任何远程控制入口——地址/令牌/开关全靠管理员编辑
+`remote.json`（改完下次轮询自动读取）。README / REMOTE-SYNC / CONFIGURATION / TODO 同步改写。
+顺手修 `cex remote server` 写 `serverUrl` 小写键读不到的老 bug（改成 `ServerUrl`）。
+
+**② 定向命令。**
+- 服务端 `lib.php` 抽出 `cx_command_list()`，每条指令带 id（老队列按内容算稳定哈希）；
+  新增 `command.php` 轻量端点，只回队列 + 签名头，不回快照。
+- 管理页命令表单从四个预设下拉改成**自由命令名 + datalist + JSON 参数 + 快捷按钮**，
+  目标可选某台设备或「所有设备」；命令名正则约束（`^[a-z][a-z0-9.]*$`），
+  下发时保留版本号前进以兼容旧客户端。
+- 客户端 `CommandPollSeconds`（默认 10s，最短 5s）独立轮询 command.php，
+  按 id 去重（`remote-state.json` 记最近 200 条），执行成功的才标记，失败留队列重试。
+  清单里的指令与 command.php 的指令共用 `ExecuteCommandsAsync`。
+
+**验收**：构建 0 错误、单测 72/72（新增命令 id 反序列化、轮询间隔收敛、状态去重三例）；
+服务端六个 PHP + command.php 全过 `php -l`，E2E 用真实管理页会话验证：
+自由命令 `duty.rotate` 单台下发带 id、command.php 立刻可见、群发 302、非法名被拒、清空后队列为空、无 PHP 告警；
+实机 DLL/cex 已换 1.0.0.9，`main` + tag 已推。
