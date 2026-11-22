@@ -203,9 +203,13 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             var key = BellProfileWriter.MakeSlotKey(layoutId, item);
             var attached = item.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid);
             // 档案编辑器里可以关掉这项附加设置，关掉就当作没配置，回退到 bell.json / 默认值。
-            var prep = attached is { IsAttachSettingsEnabled: true }
-                ? attached.PrepSeconds
-                : _settings.GetPrep(key);
+            // 三种情况：
+            //   · 档案里有这一项且启用 → 用档案里的提前量；
+            //   · 档案里有这一项但被关掉 → 这一节不响预备铃（NoPrep）；
+            //   · 档案里没有这一项 → 回退到 bell.json（可能再回退默认值）。
+            var prep = attached is null
+                ? _settings.GetPrep(key)
+                : (attached.IsAttachSettingsEnabled ? attached.PrepSeconds : BellSettings.NoPrep);
 
             slots.Add(new BellSlot(
                 key,

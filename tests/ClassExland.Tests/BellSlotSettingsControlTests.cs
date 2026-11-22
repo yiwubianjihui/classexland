@@ -66,4 +66,24 @@ public class BellSlotSettingsControlTests
         Assert.Equal(75, settings!.PrepSeconds);
         Assert.True(settings.IsAttachSettingsEnabled);
     }
+    [Fact]
+    public void 新建一节时默认不启用预备铃()
+    {
+        // 用户要求：预备铃按节启用，不是全局自动生效。
+        // 但档案里"本来就没写这个字段"的旧数据要按启用处理（否则升级会静默停用），
+        // 所以默认值留在 true，新建对象走 CreateDisabled()。
+        var fresh = BellSlotSettings.CreateDisabled();
+        Assert.False(fresh.IsAttachSettingsEnabled);
+
+        // 反序列化旧形状（只有 prepSeconds）时沿用启用，保证历史配置不失效。
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<BellSlotSettings>("{\"prepSeconds\":90}");
+        Assert.NotNull(legacy);
+        Assert.True(legacy!.IsAttachSettingsEnabled);
+    }
+
+    [Fact]
+    public void 显式关闭的节次用NoPrep表示()
+    {
+        Assert.Equal(-1, BellSettings.NoPrep);
+    }
 }

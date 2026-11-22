@@ -31,8 +31,9 @@ public sealed class BellSlotConfig
     [JsonPropertyName("prepSeconds")]
     public int PrepSeconds { get; set; } = 120;
 
+    /// <summary>默认关闭：预备铃要逐节显式启用，不再对所有课自动生效。</summary>
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
 
     [JsonPropertyName("slot")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -55,10 +56,14 @@ public sealed class BellSlotSettings : IAttachedSettings
     public int PrepSeconds { get; set; } = 120;
 
     /// <summary>
-    /// 宿主的附加设置启用开关。关闭时本项不参与计算（回退到 bell.json 或默认值），
-    /// 宿主也不会把它写回档案。
+    /// 宿主的附加设置启用开关。默认 **开启**（与历史行为一致，避免旧档案静默失效）；
+    /// 新建一节时由 <see cref="BellSlotSettings.CreateDisabled"/> 显式关掉，
+    /// 这样"预备铃逐节按需启用"和"旧档案保持原状"两个要求都满足。
     /// </summary>
     public bool IsAttachSettingsEnabled { get; set; } = true;
+
+    /// <summary>新建一节时的默认对象：预备铃默认不启用。</summary>
+    public static BellSlotSettings CreateDisabled() => new() { IsAttachSettingsEnabled = false };
 }
 
 /// <summary>
@@ -98,6 +103,9 @@ public sealed partial class BellSettings : ObservableRecipient
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never
     };
+
+    /// <summary>特殊值：这一节显式关闭了预备铃，不响也不预热。</summary>
+    public const int NoPrep = -1;
 
     private readonly string _path;
     private readonly string _optionsPath;
@@ -196,7 +204,9 @@ public sealed partial class BellSettings : ObservableRecipient
     public int GetPrep(string slotId)
     {
         var slot = _slots.FirstOrDefault(s => s.Id == slotId);
-        if (slot == null || !slot.Enabled) return DefaultPrepSeconds;
+        // 显式关闭 → 这一节不响预备铃（用 -1 表示"无预备铃"，而不是回退到默认值）。
+        if (slot is { Enabled: false }) return NoPrep;
+        if (slot == null) return DefaultPrepSeconds;
         return Math.Clamp(slot.PrepSeconds, 0, 600);
     }
 

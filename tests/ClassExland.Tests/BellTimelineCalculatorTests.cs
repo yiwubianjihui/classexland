@@ -32,15 +32,42 @@ public class BellTimelineCalculatorTests
     }
 
     [Fact]
-    public void Build_单节课生成四个时刻且时间正确()
+    public void Build_单节课前面没有课间时只推上课与下课_不响预备铃()
     {
+        // 新规则：预备铃只在该节前面确实是"课间"时才响。
+        // 单节课孤立存在（前面没下课）时不该凭空响铃。
         var moments = BellTimelineCalculator.Build(new[] { Class("A", "08:00", "08:40") }, Default, Day);
+
+        Assert.Equal(2, moments.Count);
+        Assert.DoesNotContain(moments, m => m.Kind == BellMomentKind.PrepareBell);
+        Assert.DoesNotContain(moments, m => m.Kind == BellMomentKind.PreClassNotice);
+        Assert.Equal(TimeSpan.Parse("08:00"), TimeOf(Single(moments, BellMomentKind.ClassOnNotice).At));
+        Assert.Equal(TimeSpan.Parse("08:41"), TimeOf(Single(moments, BellMomentKind.ClassEnd).At));
+    }
+
+    [Fact]
+    public void Build_课间之后那节课生成四个时刻且时间正确()
+    {
+        var moments = BellTimelineCalculator.Build(
+            new[] { Break("B0", "07:50", "08:00"), Class("A", "08:00", "08:40") }, Default, Day);
 
         Assert.Equal(4, moments.Count);
         Assert.Equal(TimeSpan.Parse("07:57"), TimeOf(Single(moments, BellMomentKind.PreClassNotice).At));
         Assert.Equal(TimeSpan.Parse("07:58"), TimeOf(Single(moments, BellMomentKind.PrepareBell).At));
         Assert.Equal(TimeSpan.Parse("08:00"), TimeOf(Single(moments, BellMomentKind.ClassOnNotice).At));
-        Assert.Equal(TimeSpan.Parse("08:41"), TimeOf(Single(moments, BellMomentKind.ClassEnd).At)); // 下课后延迟 60 秒
+        Assert.Equal(TimeSpan.Parse("08:41"), TimeOf(Single(moments, BellMomentKind.ClassEnd).At));
+    }
+
+    [Fact]
+    public void Build_连续两节课之间不插预备铃()
+    {
+        // 07:00–07:05 与 07:05–07:25 是连排上课段，中间没有下课，
+        // 第二段前面不该出现预备铃（否则会在上课中间突然响）。
+        var moments = BellTimelineCalculator.Build(
+            new[] { Class("A", "07:00", "07:05"), Class("B", "07:05", "07:25") }, Default, Day);
+
+        Assert.DoesNotContain(moments, m => m.Kind == BellMomentKind.PrepareBell);
+        Assert.Equal(2, moments.Count(m => m.Kind == BellMomentKind.ClassOnNotice));
     }
 
     [Fact]
@@ -63,12 +90,16 @@ public class BellTimelineCalculatorTests
     }
 
     [Fact]
-    public void Build_预备时长为负时回落到默认值()
+    public void Build_提前量为负表示这一节关闭_不响预备铃()
     {
-        var moments = BellTimelineCalculator.Build(new[] { Class("A", "08:00", "08:40", prep: -1) }, Default, Day);
+        // 约定：PrepSeconds == BellSettings.NoPrep(-1) 表示显式关闭，
+        // 只保留正式上课与下课事件，不响预备铃、也不发预告。
+        var moments = BellTimelineCalculator.Build(
+            new[] { Break("B0", "07:50", "08:00"), Class("A", "08:00", "08:40", prep: BellSettings.NoPrep) }, Default, Day);
 
-        // 默认 120 秒 → 预备铃 07:58
-        Assert.Equal(TimeSpan.Parse("07:58"), TimeOf(Single(moments, BellMomentKind.PrepareBell).At));
+        Assert.DoesNotContain(moments, m => m.Kind == BellMomentKind.PrepareBell);
+        Assert.DoesNotContain(moments, m => m.Kind == BellMomentKind.PreClassNotice);
+        Assert.Equal(TimeSpan.Parse("08:00"), TimeOf(Single(moments, BellMomentKind.ClassOnNotice).At));
     }
 
     [Fact]
@@ -95,10 +126,11 @@ public class BellTimelineCalculatorTests
     }
 
     [Fact]
-    public void Build_无前序课间时不裁剪预告()
+    public void Build_预告在课间之内时保持原时间不裁剪()
     {
+        // 课间 07:30–08:00，预备 600 秒 + 预告 60 秒 → 07:49，仍落在课间内，应保持原值。
         var moments = BellTimelineCalculator.Build(
-            new[] { Class("A", "08:00", "08:40", prep: 600) }, Default, Day);
+            new[] { Break("B0", "07:30", "08:00"), Class("A", "08:00", "08:40", prep: 600) }, Default, Day);
 
         Assert.Equal(TimeSpan.Parse("07:49"), TimeOf(Single(moments, BellMomentKind.PreClassNotice).At));
     }

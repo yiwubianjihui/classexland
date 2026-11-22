@@ -53,40 +53,63 @@ public static class BellTimelineCalculator
         {
             if (slot.Kind != BellSlotKind.Class) continue;
 
-            var prep = slot.PrepSeconds >= 0 ? slot.PrepSeconds : options.PrepSecondsDefault;
+            // PrepSeconds 约定：-1 = 这一节显式关闭预备铃；0 = 提前量为 0；其余为秒数。
+            var prep = slot.PrepSeconds < 0 ? 0 : slot.PrepSeconds;
+            if (slot.PrepSeconds == BellSettings.NoPrep)
+            {
+                // 关掉的节次：只保留正式上课与下课两个事件，不响预备铃也不发预告。
+                result.Add(new BellMoment(At(day, slot.Start), BellMomentKind.ClassOnNotice,
+                    slot.Id, slot.Subject, 0));
+                result.Add(new BellMoment(At(day, slot.End + endDelay), BellMomentKind.ClassEnd,
+                    slot.Id, slot.Subject, 0));
+                continue;
+            }
             var prepSpan = TimeSpan.FromSeconds(prep);
             var noticeAt = slot.Start - prepSpan - lead;
 
-            // 边界：N+60 超过前一课间时，按策略裁剪或跳过预告。
+            // 前一节到底是什么：课间 = 真的"下课"过，上课 = 连续上课段。
             var previousBreak = slots
                 .Where(s => s.Kind == BellSlotKind.Break && s.End <= slot.Start)
                 .OrderByDescending(s => s.End)
                 .FirstOrDefault();
+            var previousClass = slots
+                .Where(s => s.Kind == BellSlotKind.Class && s.End <= slot.Start && s.Id != slot.Id)
+                .OrderByDescending(s => s.End)
+                .FirstOrDefault();
 
-            var addNotice = true;
-            if (previousBreak != null && noticeAt < previousBreak.Start)
+            // 预备铃只在"前一节是课间"时响：连续上课段（如 07:00 与 07:05 两段连排）
+            // 前面并没有下课，插一条预备铃会在上课中间突然响，语义也不对。
+            var afterBreak = previousBreak != null &&
+                             (previousClass == null || previousBreak.End >= previousClass.End);
+
+            if (afterBreak)
             {
-                switch (options.PreNoticeOverflow)
+                var addNotice = true;
+                if (noticeAt < previousBreak!.Start)
                 {
-                    case PreNoticeOverflowPolicy.Skip:
-                        addNotice = false;
-                        break;
-                    case PreNoticeOverflowPolicy.ClipToMidpoint:
-                        noticeAt = previousBreak.Start +
-                                   TimeSpan.FromTicks((previousBreak.End - previousBreak.Start).Ticks / 2);
-                        break;
-                    // Keep: 保持原值
+                    switch (options.PreNoticeOverflow)
+                    {
+                        case PreNoticeOverflowPolicy.Skip:
+                            addNotice = false;
+                            break;
+                        case PreNoticeOverflowPolicy.ClipToMidpoint:
+                            noticeAt = previousBreak.Start +
+                                       TimeSpan.FromTicks((previousBreak.End - previousBreak.Start).Ticks / 2);
+                            break;
+                        // Keep: 保持原值
+                    }
                 }
-            }
 
-            if (addNotice)
-            {
-                result.Add(new BellMoment(At(day, noticeAt), BellMomentKind.PreClassNotice,
+                if (addNotice)
+                {
+                    result.Add(new BellMoment(At(day, noticeAt), BellMomentKind.PreClassNotice,
+                        slot.Id, slot.Subject, prep));
+                }
+
+                result.Add(new BellMoment(At(day, slot.Start - prepSpan), BellMomentKind.PrepareBell,
                     slot.Id, slot.Subject, prep));
             }
 
-            result.Add(new BellMoment(At(day, slot.Start - prepSpan), BellMomentKind.PrepareBell,
-                slot.Id, slot.Subject, prep));
             result.Add(new BellMoment(At(day, slot.Start), BellMomentKind.ClassOnNotice,
                 slot.Id, slot.Subject, prep));
             result.Add(new BellMoment(At(day, slot.End + endDelay), BellMomentKind.ClassEnd,
