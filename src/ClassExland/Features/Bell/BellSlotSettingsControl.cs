@@ -37,7 +37,12 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             VerticalContentAlignment = VerticalAlignment.Center
         };
         _prepBox.TextChanged += (_, _) => Commit();
-        _prepBox.LostFocus += (_, _) => Refresh();
+        // 只在"设置对象已经注入"时回读，否则会把用户刚输入的数值重置成默认 120，
+        // 看起来就是"怎么改都改不动"。输入本身就是提交动作，失焦不需要再刷一次。
+        _prepBox.LostFocus += (_, _) =>
+        {
+            if (Settings is not null && !HasValidText()) Refresh();
+        };
 
         var row = new StackPanel
         {
@@ -98,13 +103,20 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
     {
         if (_prepBox is null) return;
 
+        // 用户正在输入时不回写，否则宿主推送的刷新会把刚敲进去的数字冲掉，
+        // 表现就是"怎么改都改不动"。
+        var typing = _prepBox.IsFocused && HasValidText();
+
         var settings = Settings;
         _syncing = true;
         try
         {
-            var value = settings?.PrepSeconds ?? FallbackPrepSeconds;
-            _prepBox.Text = Math.Clamp(value, MinPrepSeconds, MaxPrepSeconds)
-                .ToString(CultureInfo.InvariantCulture);
+            if (!typing)
+            {
+                var value = settings?.PrepSeconds ?? FallbackPrepSeconds;
+                _prepBox.Text = Math.Clamp(value, MinPrepSeconds, MaxPrepSeconds)
+                    .ToString(CultureInfo.InvariantCulture);
+            }
             _prepBox.BorderBrush = null;
         }
         finally
@@ -112,15 +124,16 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             _syncing = false;
         }
 
-        // 课间/其他时段本来就不会响预备铃（时间轴只对上课时段生效）。
-        // 这里把输入框禁用，并且不让宿主把这项写回档案，避免用户改了半天却不生效。
-        var type = TryGetTimePointType();
-        var isClassSlot = type is null or 0;
-        _prepBox.IsEnabled = isClassSlot;
-        if (!isClassSlot && settings is not null)
-            settings.IsAttachSettingsEnabled = false;
-
-        UpdateHint(type);
+        // 注意：这里只做「显示」，绝不修改 settings 的任何字段。
+        //
+        // 1.0.0.5/1.0.0.6 曾在非上课时段把 IsAttachSettingsEnabled 置为 false，想让课间不写回档案。
+        // 但宿主的「启用开关」就是绑定在这个字段上的（IL 证据：Presenter.UpdateSourceSettings 读写
+        // IAttachedSettings.IsAttachSettingsEnabled，且 HasEnabledState=true），于是出现两个毛病：
+        //   · 用户一打开开关，控件渲染就把它写回 false → 再点该时间条目显示"又关掉了"；
+        //   · 同一段逻辑还把输入框 IsEnabled 锁死 → 提前量根本改不动。
+        // 现在输入框永远可编辑，是否真的响铃只用下方说明文字告知。
+        _prepBox.IsEnabled = true;
+        UpdateHint(TryGetTimePointType());
     }
 
     /// <summary>输入框 → 设置对象。宿主保存档案时会带上这个对象。</summary>
@@ -144,9 +157,12 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
     }
 
     /// <summary>
-    /// 读取宿主注入的时间点类型：0 = 上课，1 = 课间，2 = 其他（放学前等）。
+    /// 宿主注入的时间点类型，就是 <c>TimeLayoutItem.TimeType</c> 的原值
+    /// （IL 证据：Presenter.UpdateContentAttachedTimePointTimeType 里
+    /// <c>callvirt TimeLayoutItem.get_TimeType</c> → <c>callvirt set_AttachedTimePointTimeType</c>）。
+    /// 0 = 上课，1 = 课间，2 = 其他（放学/分隔点）。
     /// 编译期的 PluginSdk 2.0.0.2 没有这个属性，宿主 2.1 运行时才有，所以走反射；
-    /// 读不到时返回 null，按"上课"处理（与 1.0.0.3 行为一致，不会因为反射失败而禁用）。
+    /// 读不到时返回 null，按"上课"处理。
     /// </summary>
     private int? TryGetTimePointType()
     {
@@ -162,6 +178,14 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             // 宿主版本不支持 / 属性类型变化：退回不区分时段。
             return null;
         }
+    }
+
+    /// <summary>输入框里是不是一个能用的秒数（用于判断失焦时该不该回读覆盖）。</summary>
+    private bool HasValidText()
+    {
+        var text = _prepBox?.Text?.Trim();
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
+               && v >= MinPrepSeconds && v <= MaxPrepSeconds;
     }
 
     private void UpdateHint(int? timePointType)
@@ -182,6 +206,9 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             return;
         }
 
-        _hint.Text = "当前是课间（或放学等非上课时段），预备铃只在上课时段之前响，这项设置不参与计算。";
+        // 课间/分隔点：提前量会照常保存，只是时间轴不会在它之前响铃。
+        // 这里只说明事实，不锁输入框、也不动启用开关——那两件事曾经让用户以为"改不动"。
+        _hint.Text = "这一条是课间或其他非上课时段，预备铃声不会在它之前响；"
+                     + "提前量仍会保存到档案里，改成上课时段后即刻生效。";
     }
 }

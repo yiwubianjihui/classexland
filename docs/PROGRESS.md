@@ -389,3 +389,35 @@ E2E 用临时设备验证：首次上传 200、清单出现文件、签名逐字
 服务端六个 PHP + command.php 全过 `php -l`，E2E 用真实管理页会话验证：
 自由命令 `duty.rotate` 单台下发带 id、command.php 立刻可见、群发 302、非法名被拒、清空后队列为空、无 PHP 告警；
 实机 DLL/cex 已换 1.0.0.9，`main` + tag 已推。
+
+## 2026-11-22 21:10 · 1.0.0.10（修复档案编辑器里预备铃改不动 / 开关自动关闭）
+
+用户报：在档案时间表打开预备铃开关后，提前量改不动；再点该时间条目，开关又显示关掉了。
+
+排查没有靠猜，直接读宿主 IL（`AttachedSettingsControlPresenter`）拿到了三条决定性证据：
+
+1. `UpdateContentAttachedTimePointTimeType` 的实现是
+   `callvirt TimeLayoutItem.get_TimeType` → `callvirt set_AttachedTimePointTimeType`，
+   即宿主把时间点的 `TimeType` **原值**（Int32，0=上课/1=课间/2=分隔）直接推给控件；
+2. `UpdateSourceSettings` 里 `callvirt IAttachedSettings.get_IsAttachSettingsEnabled`，
+   并结合 `AttachedSettingsControlInfo.HasEnabledState` 决定是否把对象写回 `AttachedObjects`——
+   也就是说**宿主的启用开关就是绑在 `IsAttachSettingsEnabled` 上的**；
+3. `RegisterTimePointTimeTypeObserver` 用 `ObservableForProperty` 订阅 `TimeType` 变化并再次调用推送方法，
+   说明控件会多次收到刷新。
+
+结论：1.0.0.5 那版为了"课间不写回档案"，在 `Refresh()` 里把 `IsAttachSettingsEnabled = false`，
+与宿主的开关绑定直接打架——用户一打开开关，控件渲染立刻写回 false，于是"再点又关掉了"；
+同一段代码还把 `_prepBox.IsEnabled` 设成 false，于是"提前量改不动"。两个症状同一个根因。
+
+修法：
+
+- **渲染只读**：`Refresh()` 不再修改 `settings` 任何字段，`_prepBox.IsEnabled` 恒为 true；
+  课间/分隔点只在说明文字里写清"不会响铃，但提前量照常保存"。
+- **不再冲掉用户输入**：`Refresh()` 检测到输入框有焦点且内容合法时跳过回写；
+  失焦只在内容无效时才回读（原来每次 TextChanged 后紧跟一次 Refresh 会把刚敲的数字重置成 120）。
+- 新增 `BellSlotSettingsControlTests`（4 例）锁住：默认启用为真、序列化往返不丢启用状态、
+  0–600 秒可自由设置、旧档案只有 `prepSeconds` 时默认启用。
+
+构建 0 错误、单测 **79/79**；`ClassExland.cipx` 292632 B；实机 DLL 已换 1.0.0.10
+（宿主在运行，用"先改名再写入"换掉被占用的 DLL，旧版留 `artifacts/backup-1.0.0.9.dll`，
+重启宿主后生效）。
