@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Avalonia.Threading;
 using ClassExland.Contracts;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Abstractions.Services.NotificationProviders;
@@ -178,6 +179,22 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
 
     private void Broadcast(LuckyConfig cfg, string text)
     {
+        // CreateTwoIconsMask 内部会 new LucideIconSource（Avalonia 控件对象），
+        // 只能在 UI 线程构造；本服务由 PostMainTimerTicked 驱动，所在线程不保证是 UI 线程
+        // （实测抛过 "Call from invalid thread"）。统一 Post 到 UI 线程再发。
+        try
+        {
+            if (Dispatcher.UIThread.CheckAccess()) BroadcastCore(cfg, text);
+            else Dispatcher.UIThread.Post(() => BroadcastCore(cfg, text));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "调度 LuckyPicker 广播失败。");
+        }
+    }
+
+    private void BroadcastCore(LuckyConfig cfg, string text)
+    {
         try
         {
             var maskDuration = TimeSpan.FromSeconds(cfg.MaskDurationSeconds);
@@ -229,7 +246,8 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
         if (request is null) return;
         try
         {
-            request.Cancel();
+            if (Dispatcher.UIThread.CheckAccess()) request.Cancel();
+            else Dispatcher.UIThread.Post(() => { try { request.Cancel(); } catch { } });
         }
         catch (Exception ex)
         {

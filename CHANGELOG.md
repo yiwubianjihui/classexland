@@ -4,6 +4,18 @@
 
 ## [未发布]
 
+## [1.0.0.12] - 2026-11-22
+
+### 修复
+
+- **LuckyPicker 广播偶发失败（`Call from invalid thread`）**：`NotificationContent.CreateTwoIconsMask`
+  内部会 `new LucideIconSource()`，那是 Avalonia 对象，只能在 UI 线程构造；
+  而本服务由 `PostMainTimerTicked` 驱动，所在线程不保证是 UI 线程。
+  实测在 21:24:41 抛过一次 `InvalidOperationException: Call from invalid thread`，
+  21:25:19 又碰巧成功——属于随机触雷。现在统一 `Dispatcher.UIThread` 调度：
+  已在 UI 线程就直接发，否则 `Post` 过去；关闭上一条提醒同样回到 UI 线程。
+
+
 ## [1.0.0.11] - 2026-11-22
 
 ### 新增

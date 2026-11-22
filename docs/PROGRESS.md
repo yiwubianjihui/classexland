@@ -455,3 +455,31 @@ E2E 用临时设备验证：首次上传 200、清单出现文件、签名逐字
 验收：构建 0 错误、单测 **98/98**，其中 2 例直接读**本机真实的** LuckyPicker 历史文件
 （解析成功率、指纹唯一、模拟新抽选只返回新增那条）。实机 DLL 已换 1.0.0.11
 （md5 `7E312DFA…`，宿主当时未运行，重启即生效），`cex` 同步更新；cipx 300285 B。
+
+## 2026-11-22 21:55 · 1.0.0.12（修 LuckyPicker 广播的 UI 线程崩溃）
+
+用户让我启用 LuckyPicker 联动。改 `lucky.json` 的 `Enabled=true` 后热加载即生效
+（`cex lucky status` 显示 KnownCount=78 / Primed=true / LastPollAt 正常跳动），
+手动 `lucky.announce` 也通。但注入一条模拟抽选做端到端验证时，宿主日志里出现：
+
+```
+21:24:41 Warning 广播 LuckyPicker 抽选失败
+System.InvalidOperationException: Call from invalid thread
+  at Avalonia.Threading.Dispatcher.VerifyAccess
+  at FluentAvalonia.UI.Controls.IconSource..ctor
+  at ClassIsland.Core.Controls.LucideIconSource..ctor
+  at ClassIsland.Core.Models.Notification.Templates.TwoIconsMaskTemplateData..ctor
+  at ClassIsland.Core.Models.Notification.NotificationContent.CreateTwoIconsMask
+```
+
+根因：`CreateTwoIconsMask` 会构造 `LucideIconSource`（Avalonia 对象），必须 UI 线程；
+而本服务跑在 `PostMainTimerTicked` 回调里，线程不保证是 UI 线程。
+21:25:19 那次又成功了——所以是**随机触雷**，不修就会偶发丢广播。
+（Bell 模块写法相同却没暴露，是因为它由 `MomentReached` 事件触发，通常已在 UI 线程。）
+
+修法：`Broadcast` 拆成调度壳 + `BroadcastCore`，用
+`Dispatcher.UIThread.CheckAccess()` 判断，必要就 `Post`；`CloseActive()` 的 `Cancel()`
+同样回 UI 线程执行。`AnnounceAsync` 走同一条 `Broadcast`，一并修好。
+
+验证：构建 0 错误、单测 98/98；实机 DLL 已换 1.0.0.12（md5 `E484C4F5…`）。
+测试注入的假记录已从 `history.json` 还原（78 条、无残留）。
