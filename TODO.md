@@ -23,8 +23,8 @@
 | 16 | 打 tag + Release 资产（cipx + SHA256SUMS） | ✅ | team-lead | `v1.0.0.0` → run `44458193363`，资产已发布并核验 SHA256 |
 | 17 | 逐节课预备铃提前量（设置页表格 / CLI `--index` / 远程热生效） | ✅ | team-lead | `Features/Bell/BellSlotCatalog.cs`、`BellSettingsPage.axaml`、`Bridge/CommandDispatcher.Bell.cs`、`Remote/RemoteSettingsPage.axaml` |
 | 18 | 部署 1.0.0.2 到实机 | ✅ | team-lead | `data/Plugins/yibianhui.classexland/` 已覆盖（DLL MD5 `26F0FD6D…` 与构建产物一致，manifest 1.0.0.2） |
-| 19 | 远程控制设置页（面向普通用户） | ✅ | team-lead | `Remote/RemoteSettingsPage.axaml(.cs)`：状态卡、保存并测试、错误中文化、高级折叠、本机网页控制台、诊断复制 |
-| 20 | 实机打开设置页验收 | 🔄 | 用户 + team-lead | 启动 ClassIsland → 设置 → 「ClassExland 远程控制」，确认页面正常渲染、状态卡与按钮可用 |
+| 19 | 远程控制设置页（面向普通用户） | ⛔ 已移除 | team-lead | 1.0.0.9 起不再注册该页，避免学生误操作；远程配置只由管理员编辑 `remote.json` |
+| 20 | 实机打开设置页验收 | ⛔ 作废 | 用户 + team-lead | 页面已移除；改为验证 `cex remote status` 与服务端定向命令下发 |
 | 21 | 档案编辑器内嵌预备铃设置 | ✅ | team-lead | `Features/Bell/BellSlotSettingsControl.cs`（`AttachedSettingsTargets.TimePoint`）；`BellSlotSettings` 实现 `IAttachedSettings` |
 | 22 | 部署 1.0.0.3 到实机 | ✅ | team-lead | `data/Plugins/yibianhui.classexland/`（DLL MD5 `474B9F2B…` 与构建一致，manifest 1.0.0.3；旧版备份 `artifacts/backup-1.0.0.2/`） |
 | 23 | 实机确认档案编辑里能看到「预备铃（ClassExland）」 | 🔄 | 用户 | 启动 ClassIsland → 档案编辑 → 时间表 → 选中上课时段 → 附加设置 |

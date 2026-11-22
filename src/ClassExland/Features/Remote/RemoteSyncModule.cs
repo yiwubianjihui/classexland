@@ -180,6 +180,8 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
             _ = Task.Run(() => SyncOnceAsync(cfg, token), CancellationToken.None);
             // 之后按配置周期轮询：先检查服务端新版本，再检查本地变更并上传。
             _ = Task.Run(() => RunPollLoopAsync(token), CancellationToken.None);
+            // 指令单独短周期拉取（默认 10 秒），让管理页点「立即下发」很快生效。
+            _ = Task.Run(() => RunCommandLoopAsync(token), CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -325,31 +327,7 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
             // 7) 指令队列（经 ICommandDispatcher，与 CLI 共用命令层）
             if (cfg.EnableCommandQueue)
             {
-                if (_dispatcher is null)
-                {
-                    report.Add("命令层（AddCommandBridge）未注册，跳过指令队列");
-                    _audit.Log("command-skip", "ICommandDispatcher 未注册", ok: false);
-                }
-                else
-                {
-                    foreach (var command in manifest.Commands)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        try
-                        {
-                            var request = new CommandRequest(
-                                command.Command, command.Args, "remote", command.Apply, command.DryRun);
-                            var result = await _dispatcher.ExecuteAsync(request, ct).ConfigureAwait(false);
-                            report.Add($"指令 {command.Command}: {(result.Ok ? "ok" : result.Message)}");
-                            _audit.Log("command", $"{command.Command}: {result.Message}", ok: result.Ok);
-                        }
-                        catch (Exception ex)
-                        {
-                            report.Add($"指令 {command.Command} 异常：{ex.Message}");
-                            _audit.Log("command-exception", $"{command.Command}: {ex.Message}", ok: false);
-                        }
-                    }
-                }
+                await ExecuteCommandsAsync(manifest.Commands, cfg, report, ct).ConfigureAwait(false);
             }
 
             // 8) 记录版本与本地指纹，完成。

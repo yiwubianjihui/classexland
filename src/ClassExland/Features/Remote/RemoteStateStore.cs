@@ -51,6 +51,31 @@ public sealed class RemoteStateStore
         return (doc?.LastConflict ?? "", doc?.LastUploadAt);
     }
 
+    /// <summary>已执行过的指令 id（最近 200 条），防止同一条指令被重复执行。</summary>
+    public IReadOnlyList<string> LoadAppliedCommandIds()
+    {
+        var doc = Read();
+        return doc?.AppliedCommandIds ?? new List<string>();
+    }
+
+    public bool MarkCommandApplied(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        try
+        {
+            var doc = Read() ?? new StateDoc();
+            doc.AppliedCommandIds.Remove(id);
+            doc.AppliedCommandIds.Insert(0, id);
+            if (doc.AppliedCommandIds.Count > 200)
+                doc.AppliedCommandIds = doc.AppliedCommandIds.GetRange(0, 200);
+            return Write(doc);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public bool SaveApplied(string version, string etag, string head = "", IReadOnlyDictionary<string, string>? localHashes = null)
     {
         try
@@ -143,5 +168,6 @@ public sealed class RemoteStateStore
         public Dictionary<string, string> LocalHashes { get; set; } = new();
         public DateTimeOffset? LastUploadAt { get; set; }
         public string LastConflict { get; set; } = "";
+        public List<string> AppliedCommandIds { get; set; } = new();
     }
 }

@@ -26,8 +26,8 @@ public static class RemoteRegistration
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RemoteSyncModule>());
         services.AddSingleton<IRemoteSyncService>(sp => sp.GetRequiredService<RemoteSyncModule>());
 
-        // 远程地址/令牌/同步范围全部在设置页里改，不用手编 remote.json。
-        services.AddSettingsPage<RemoteSettingsPage>();
+        // 刻意不注册设置页：远程配置只由管理员编辑 remote.json。
+        // 教室里任何人都能进 ClassIsland 的设置页，把地址/令牌/开关暴露在那里容易被误改。
         return services;
     }
 }

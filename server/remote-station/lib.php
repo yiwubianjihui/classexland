@@ -307,6 +307,32 @@ function cx_new_token(int $bytes = 24): string
     return rtrim(strtr(base64_encode(random_bytes($bytes)), '+/', '-_'), '=');
 }
 
+/** 指令队列的对外形态：带 id，客户端按 id 去重，避免重复执行。 */
+function cx_command_list(array $device, string $deviceName = ''): array
+{
+    $commands = [];
+    foreach (($device['commands'] ?? []) as $cmd) {
+        if (!is_array($cmd) || empty($cmd['command'])) {
+            continue;
+        }
+        $args = new stdClass();
+        if (!empty($cmd['args']) && is_array($cmd['args'])) {
+            foreach ($cmd['args'] as $k => $v) {
+                $args->{(string)$k} = (string)$v;
+            }
+        }
+        $commands[] = [
+            'id'      => (string)($cmd['id'] ?? hash('sha256',
+                $deviceName . json_encode($cmd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))),
+            'command' => (string)$cmd['command'],
+            'args'    => $args,
+            'apply'   => (bool)($cmd['apply'] ?? true),
+            'dryRun'  => (bool)($cmd['dryRun'] ?? false),
+        ];
+    }
+    return $commands;
+}
+
 /**
  * 生成某台设备的清单原文。插件配置原样嵌入，不做 decode/encode。
  */
@@ -326,24 +352,7 @@ function cx_build_manifest(array $device, string $deviceName = '', string $head 
     $version = ($device['version'] ?? '') !== '' ? (string)$device['version'] : '0';
     $etag    = ($device['etag'] ?? '') !== '' ? (string)$device['etag'] : '0';
 
-    $commands = [];
-    foreach (($device['commands'] ?? []) as $cmd) {
-        if (!is_array($cmd) || empty($cmd['command'])) {
-            continue;
-        }
-        $args = new stdClass();
-        if (!empty($cmd['args']) && is_array($cmd['args'])) {
-            foreach ($cmd['args'] as $k => $v) {
-                $args->{(string)$k} = (string)$v;
-            }
-        }
-        $commands[] = [
-            'command' => (string)$cmd['command'],
-            'args'    => $args,
-            'apply'   => (bool)($cmd['apply'] ?? true),
-            'dryRun'  => (bool)($cmd['dryRun'] ?? false),
-        ];
-    }
+    $commands = cx_command_list($device, $deviceName);
 
     $uploadPath = rtrim(dirname($_SERVER['PHP_SELF'] ?? '/index.php'), '/\\') . '/upload.php';
 

@@ -126,4 +126,47 @@ public class RemoteDiffTests
         }
         finally { Directory.Delete(dir, true); }
     }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(2, 10)]
+    [InlineData(9999, 10)]
+    [InlineData(25, 25)]
+    public void Sanitize_命令轮询间隔限制在5到3600(int raw, int expected)
+    {
+        var cfg = RemoteConfig.Sanitize(new RemoteConfig { CommandPollSeconds = raw });
+        Assert.Equal(expected, cfg.CommandPollSeconds);
+    }
+
+    [Fact]
+    public void RemoteCommand_能读出服务端带的id()
+    {
+        var cmd = System.Text.Json.JsonSerializer.Deserialize<RemoteCommand>(
+            "{\"id\":\"abc123\",\"command\":\"layout.switch\",\"args\":{\"to\":\"class\"},\"apply\":true}");
+
+        Assert.NotNull(cmd);
+        Assert.Equal("abc123", cmd!.Id);
+        Assert.Equal("layout.switch", cmd.Command);
+        Assert.Equal("class", cmd.Args["to"]);
+    }
+
+    [Fact]
+    public void StateStore_指令id去重且保留最近200条()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            var store = new RemoteStateStore(new PluginPaths(dir));
+            store.MarkCommandApplied("a");
+            store.MarkCommandApplied("b");
+            store.MarkCommandApplied("a");
+
+            var ids = store.LoadAppliedCommandIds();
+            Assert.Equal(new[] { "a", "b" }, ids.OrderBy(x => x).ToArray());
+
+            for (var i = 0; i < 205; i++) store.MarkCommandApplied("id" + i);
+            Assert.Equal(200, store.LoadAppliedCommandIds().Count);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
 }

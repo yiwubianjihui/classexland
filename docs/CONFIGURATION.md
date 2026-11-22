@@ -266,6 +266,7 @@
   "HmacSecret": "",                  // 可选；配了就对响应原文与上传请求体双向签名
   "FetchTimeoutSeconds": 15,
   "PollIntervalSeconds": 60,         // 周期轮询：先查服务端新版本，再查本地变更并上传
+  "CommandPollSeconds": 10,          // 指令单独轮询（最短 5 秒），服务端点「立即下发」后很快生效
   "AutoUpload": true,                // 本地四个配置有变化时自动上传
   "EnableSnapshotSync": true,        // 是否应用服务端下发的插件配置快照
   "EnableCoreConfigSync": false,     // 高风险：课程表 Settings.json / Profiles

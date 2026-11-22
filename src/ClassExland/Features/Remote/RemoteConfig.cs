@@ -28,6 +28,9 @@ public sealed class RemoteConfig
     /// <summary>定期轮询间隔（秒）。每次轮询同时检查服务端新版本与本地变更。</summary>
     public int PollIntervalSeconds { get; set; } = 60;
 
+    /// <summary>指令队列的独立轮询间隔（秒），比配置同步快得多，默认 10 秒。</summary>
+    public int CommandPollSeconds { get; set; } = 10;
+
     /// <summary>本地配置有变化时自动上传（首次安装也会把现有配置整体传上去）。</summary>
     public bool AutoUpload { get; set; } = true;
 
@@ -71,6 +74,7 @@ public sealed class RemoteConfig
         c.UploadPath = c.UploadPath.Trim();
         if (!c.UploadPath.StartsWith('/')) c.UploadPath = "/" + c.UploadPath;
         c.PollIntervalSeconds = c.PollIntervalSeconds is < 15 or > 3600 ? 60 : c.PollIntervalSeconds;
+        c.CommandPollSeconds = c.CommandPollSeconds is < 5 or > 3600 ? 10 : c.CommandPollSeconds;
         c.BearerToken ??= "";
         c.HmacSecret ??= "";
         c.FetchTimeoutSeconds = c.FetchTimeoutSeconds is < 1 or > 120 ? 15 : c.FetchTimeoutSeconds;

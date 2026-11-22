@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ClassExland.Contracts;
 
 namespace ClassExland.Features.Remote;
 
@@ -205,6 +207,129 @@ public sealed partial class RemoteSyncModule
             result.Message = $"上传异常：{ex.GetType().Name}: {ex.Message}";
             _audit.Log("upload-exception", result.Message, ok: false);
             return result;
+        }
+    }
+
+    /// <summary>
+    /// 指令的独立短周期轮询。即使配置文件一个字没变，管理员在服务器上点的命令也能很快落地。
+    /// 端点只回队列，不回快照；按 id 去重，所以轮询本身是只读的、可重复调用。
+    /// </summary>
+    private async Task RunCommandLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var cfg = _configStore.Load();
+            var seconds = cfg.CommandPollSeconds is < 5 or > 3600 ? 10 : cfg.CommandPollSeconds;
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (!cfg.CanSync() || !cfg.EnableCommandQueue ||
+                File.Exists(_paths.Get("remote.disabled"))) continue;
+
+            try
+            {
+                await PollCommandsOnceAsync(cfg, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _audit.Log("command-poll-exception", $"{ex.GetType().Name}: {ex.Message}", ok: false);
+            }
+        }
+    }
+
+    private async Task PollCommandsOnceAsync(RemoteConfig cfg, CancellationToken ct)
+    {
+        var path = cfg.ManifestPath.EndsWith("manifest.php", StringComparison.OrdinalIgnoreCase)
+            ? cfg.ManifestPath[..^"manifest.php".Length] + "command.php"
+            : "/remote/command.php";
+        var url = cfg.ServerUrl.TrimEnd('/') + path;
+        if (cfg.DeviceName.Length > 0)
+            url += (url.Contains('?') ? "&" : "?") + "device=" + Uri.EscapeDataString(cfg.DeviceName);
+
+        string raw;
+        string? headerSignature = null;
+        using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) })
+        {
+            using var req = BuildRequest(cfg, url);
+            using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 多设备没填名字、令牌过期等只记日志，别把配置同步的状态污染成失败。
+                _audit.Log("command-poll-fail", $"HTTP {(int)resp.StatusCode}", ok: false);
+                return;
+            }
+            if (resp.Headers.TryGetValues("X-ClassExland-Signature", out var values))
+                headerSignature = values.FirstOrDefault();
+            raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+
+        if (!SafeConfigWriter.IsValidJson(raw)) return;
+        if (!string.IsNullOrEmpty(cfg.HmacSecret) && !VerifySignature(raw, headerSignature, "", cfg.HmacSecret))
+        {
+            _audit.Log("command-poll-hmac", "签名不匹配，忽略本批指令", ok: false);
+            return;
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        if (!doc.RootElement.TryGetProperty("commands", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+
+        var done = new HashSet<string>(_state.LoadAppliedCommandIds(), StringComparer.Ordinal);
+        var fresh = new List<RemoteCommand>();
+        foreach (var el in arr.EnumerateArray())
+        {
+            var cmd = el.Deserialize<RemoteCommand>();
+            if (cmd is null || string.IsNullOrWhiteSpace(cmd.Command)) continue;
+            var id = string.IsNullOrWhiteSpace(cmd.Id)
+                ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cmd.Command)))
+                : cmd.Id;
+            cmd.Id = id;
+            if (done.Contains(id)) continue;
+            fresh.Add(cmd);
+        }
+        if (fresh.Count == 0) return;
+
+        var report = new SyncReport();
+        // 执行成功的 id 由 ExecuteCommandsAsync 记录；失败的留在服务端队列里，下轮再试。
+        await ExecuteCommandsAsync(fresh, cfg, report, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>清单里的指令与 command.php 拉到的指令共用同一执行/去重路径。</summary>
+    private async Task ExecuteCommandsAsync(
+        IEnumerable<RemoteCommand> commands, RemoteConfig cfg, SyncReport report, CancellationToken ct)
+    {
+        if (_dispatcher is null)
+        {
+            report.Add("命令层（AddCommandBridge）未注册，跳过指令队列");
+            _audit.Log("command-skip", "ICommandDispatcher 未注册", ok: false);
+            return;
+        }
+
+        var done = new HashSet<string>(_state.LoadAppliedCommandIds(), StringComparer.Ordinal);
+        foreach (var command in commands)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(command.Id) && !done.Add(command.Id)) continue;
+
+            try
+            {
+                var request = new CommandRequest(
+                    command.Command, command.Args, "remote", command.Apply, command.DryRun);
+                var result = await _dispatcher.ExecuteAsync(request, ct).ConfigureAwait(false);
+                report.Add($"指令 {command.Command}: {(result.Ok ? "ok" : result.Message)}");
+                _audit.Log("command", $"{command.Command}: {result.Message}", ok: result.Ok);
+                if (!string.IsNullOrWhiteSpace(command.Id)) _state.MarkCommandApplied(command.Id);
+            }
+            catch (Exception ex)
+            {
+                report.Add($"指令 {command.Command} 异常：{ex.Message}");
+                _audit.Log("command-exception", $"{command.Command}: {ex.Message}", ok: false);
+            }
         }
     }
 

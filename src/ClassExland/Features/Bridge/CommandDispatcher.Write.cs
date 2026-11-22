@@ -479,8 +479,8 @@ public sealed partial class CommandDispatcher
         {
             var backup = _store.Backup(ConfigFiles.Remote);
             var root = JsonNode.Parse(_store.ReadRaw(ConfigFiles.Remote) ?? "{}") as JsonObject ?? new JsonObject();
-            if (clear) root.Remove("serverUrl");
-            else root["serverUrl"] = server;
+            if (clear) root.Remove("ServerUrl");
+            else root["ServerUrl"] = server;
             _store.Write(ConfigFiles.Remote, root);
             return Task.FromResult(Ok(new { server, clear, backup, note = "地址保存在外部配置文件，未硬编码" }));
         }

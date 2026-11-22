@@ -71,6 +71,10 @@ public sealed class CoreProfileEntry
 /// <summary>远程指令：映射到 ICommandDispatcher 的 CommandRequest，与 CLI 共用命令层。</summary>
 public sealed class RemoteCommand
 {
+    /// <summary>服务端给的稳定 id，客户端按它去重。</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
     [JsonPropertyName("command")]
     public string Command { get; set; } = "";
 

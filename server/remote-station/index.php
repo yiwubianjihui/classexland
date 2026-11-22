@@ -260,14 +260,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'command_add') {
-        $name = cx_device_name((string)($_POST['device'] ?? ''));
-        if (!isset($state['devices'][$name])) {
+        $name = (string)($_POST['device'] ?? '');
+        $allDevices = $name === '*';
+        if (!$allDevices && !isset($state['devices'][cx_device_name($name)])) {
             cx_redirect('设备不存在，未加入队列。');
         }
         $command = trim((string)($_POST['command'] ?? ''));
         $argsRaw = trim((string)($_POST['args'] ?? ''));
-        if ($command === '') {
-            cx_redirect('指令名不能为空。');
+        // 命令名来自共享命令层（CLI 与远程队列同一套），允许任意合法命令，不锁死在预设下拉里。
+        if ($command === '' || strlen($command) > 80 || preg_match('/^[a-z][a-z0-9.]*$/i', $command) !== 1) {
+            cx_redirect('指令名不合法：用小写字母与点，例如 layout.switch。');
         }
         $args = [];
         if ($argsRaw !== '') {
@@ -282,18 +284,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $args[(string)$k] = $v === null ? '' : (string)$v;
             }
         }
-        $state['devices'][$name]['commands'][] = [
-            'command' => $command,
-            'args'    => $args,
-            'apply'   => !empty($_POST['apply']),
-            'dryRun'  => false,
-        ];
-        $state['devices'][$name]['version'] = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
-        $state['devices'][$name]['updated_at'] = date('Y-m-d H:i:s');
-        $state['devices'][$name]['etag'] = substr(hash('sha256', cx_build_manifest($state['devices'][$name], $name)), 0, 12);
-        cx_save_state($state);
-        cx_log_request('command_add', 200, $name . ' ' . $command);
-        cx_redirect('已为「' . $name . '」加入指令：' . $command . '（该设备下次同步时执行）');
+
+        $targets = $allDevices ? array_keys($state['devices']) : [cx_device_name($name)];
+        foreach ($targets as $target) {
+            if (!isset($state['devices'][$target])) continue;
+            $state['devices'][$target]['commands'][] = [
+                'id'      => bin2hex(random_bytes(12)),
+                'command' => $command,
+                'args'    => $args,
+                'apply'   => !empty($_POST['apply']),
+                'dryRun'  => false,
+            ];
+            $state['devices'][$target]['updated_at'] = date('Y-m-d H:i:s');
+            // 同时前进版本号：老客户端没有 command.php 轮询，仍能从清单里拿到指令。
+            $state['devices'][$target]['version'] = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
+            $state['devices'][$target]['etag'] = substr(hash('sha256', cx_build_manifest($state['devices'][$target], $target)), 0, 12);
+        }
+        if (!cx_save_state($state)) cx_redirect('写入状态失败，请检查 data 目录权限。');
+        cx_log_request('command_add', 200, implode(',', $targets) . ' ' . $command);
+        cx_redirect('已给 ' . count($targets) . ' 台设备加入指令：' . $command . '（客户端命令轮询默认 10 秒内执行）');
     }
 
     if ($action === 'command_clear') {
@@ -635,32 +644,46 @@ $hmac  = (string)$config['hmac_secret'];
   </section>
 
   <section class="card">
-    <h2>「<?= cx_h($selected) ?>」的指令队列</h2>
-    <p class="muted">指令与 CLI 共用命令层。这台设备同步时按顺序执行，执行后版本会前进。</p>
+    <h2>给设备下指令</h2>
+    <p class="muted">指令与 CLI 共用命令层，命令名和参数原样下发。客户端有独立的命令轮询（默认 10 秒），不必等配置快照；按指令 id 去重，不会重复执行。选「所有设备」可一次群发。</p>
     <form method="post">
       <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
       <input type="hidden" name="action" value="command_add">
-      <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
-      <label>指令</label>
-      <select name="command">
-        <option value="layout.switch">layout.switch（切换上课/下课布局）</option>
-        <option value="bell.set">bell.set（设置某节课预备铃）</option>
-        <option value="duty.rotate">duty.rotate（轮换到下一批值日）</option>
-        <option value="remote.sync">remote.sync（让客户端立即再拉一次）</option>
+      <label>目标设备</label>
+      <select name="device">
+        <?php foreach ($names as $n): ?>
+          <option value="<?= cx_h($n) ?>" <?= $n === $selected ? 'selected' : '' ?>><?= cx_h($n) ?></option>
+        <?php endforeach; ?>
+        <option value="*">所有设备（<?= count($names) ?> 台）</option>
       </select>
-      <label>参数（JSON，值必须是字符串）</label>
-      <input type="text" name="args" placeholder='{"to":"class"} 或 {"index":"3","prep":"90"}'>
+      <label>命令名（可手填任意合法命令）</label>
+      <input type="text" id="cxCommand" name="command" list="cxCommandList" placeholder="layout.switch" required maxlength="80">
+      <datalist id="cxCommandList">
+        <option value="layout.switch"><option value="layout.current">
+        <option value="bell.set"><option value="duty.rotate"><option value="duty.complete">
+        <option value="activity.test"><option value="remote.sync"><option value="remote.status">
+        <option value="profile.switch"><option value="class.set"><option value="config.doctor">
+      </datalist>
+      <div class="row">
+        <button type="button" onclick="document.getElementById('cxCommand').value='layout.switch';document.getElementById('cxArgs').value='{"to":"class"}'">切上课布局</button>
+        <button type="button" onclick="document.getElementById('cxCommand').value='layout.switch';document.getElementById('cxArgs').value='{"to":"break"}'">切下课布局</button>
+        <button type="button" onclick="document.getElementById('cxCommand').value='duty.rotate';document.getElementById('cxArgs').value='{}'">轮换值日</button>
+        <button type="button" onclick="document.getElementById('cxCommand').value='remote.sync';document.getElementById('cxArgs').value='{}'">立即同步</button>
+      </div>
+      <label>参数（JSON 对象，值用字符串）</label>
+      <input type="text" id="cxArgs" name="args" placeholder='{"to":"class"} 或 {"index":"3","prep":"90"}'>
       <div class="row">
         <label style="margin:0"><input type="checkbox" name="apply" checked> 真正执行（不勾选只预览）</label>
-        <button type="submit">加入队列</button>
+        <button class="primary" type="submit">立即下发</button>
       </div>
     </form>
 
     <?php if (!empty($device['commands'])): ?>
       <table style="margin-top:14px">
-        <tr><th>指令</th><th>参数</th><th>执行</th></tr>
+        <tr><th>id</th><th>指令</th><th>参数</th><th>执行</th></tr>
         <?php foreach ($device['commands'] as $cmd): ?>
           <tr>
+            <td><code><?= cx_h(substr((string)($cmd['id'] ?? ''), 0, 10)) ?></code></td>
             <td><code><?= cx_h((string)($cmd['command'] ?? '')) ?></code></td>
             <td><code><?= cx_h(json_encode($cmd['args'] ?? [], JSON_UNESCAPED_UNICODE)) ?></code></td>
             <td><?= !empty($cmd['apply']) ? '是' : '预览' ?></td>
