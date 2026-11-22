@@ -15,6 +15,7 @@ ClassIsland 插件：**贴着现有课表长出来的"上课自动化"整合包*
 - **特殊活动**：内置"试写作业"等预设，开始前 **10 分钟** 提前提示并附带当日值日名单，可逐项关闭。
 - **界面自动切换**：预备铃起切紧凑布局、下课延迟后切完整布局；布局名、缩放、透明度均可配置，不覆盖你已有的自动化文件。
 - **旧插件迁移**：从 DutyList、DutyRoster、试写作业插件、lrs2187.duty 导入配置（追加不覆盖），导入后停用旧插件。
+- **LuckyPicker 联动（可选）**：LuckyPicker 抽到的名字直接广播到主界面。它没有 IPC，所以只读监听 `%LOCALAPPDATA%\LuckyPicker\history.json`，指纹去重后走宿主提醒通道；默认关，连抽会拆人名，开机不刷历史。
 - **远程配置同步（可选）**：自托管服务器上的"快照下发 + 本地变更上传 + 指令队列"双向同步；服务端按设备做哈希版本库与 diff 管理，冲突由服务器裁决；仅 HTTPS、双向签名、自动备份、失败回滚、可一键停用；断网不影响本地使用。
 - **运维 CLI（`cex`）**：只读优先，写命令默认 `--dry-run`、需 `--yes`，高危命令额外 `--confirm`；支持 `--json` 与稳定退出码，覆盖多档案切换与本地 Web 管理页。
 - **更多**：铃声文件/音量/试听、今日时间轴诊断面板、临时调课感知、轮换日历预览、值日完成记录、TTS 人名朗读、LuckyPicker 联动、节假日跳过、值日历史导出、多班级档案切换等。
@@ -112,5 +113,5 @@ dotnet build ClassExland.sln -c Release
 ## 文档
 
 - [设计稿](docs/DESIGN.md) · [决策记录](docs/DECISIONS.md) · [进度](docs/PROGRESS.md) · [任务清单](TODO.md)
-- [配置说明](docs/CONFIGURATION.md) · [旧插件迁移](docs/MIGRATION.md) · [远程同步](docs/REMOTE-SYNC.md) · [CLI 参考](docs/CLI.md)
+- [配置说明](docs/CONFIGURATION.md) · [旧插件迁移](docs/MIGRATION.md) · [远程同步](docs/REMOTE-SYNC.md) · [LuckyPicker 联动](docs/LUCKY-PICKER.md) · [CLI 参考](docs/CLI.md)
 - [更新日志](CHANGELOG.md) · [贡献指南](docs/CONTRIBUTING.md)

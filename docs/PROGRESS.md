@@ -421,3 +421,37 @@ E2E 用临时设备验证：首次上传 200、清单出现文件、签名逐字
 构建 0 错误、单测 **79/79**；`ClassExland.cipx` 292632 B；实机 DLL 已换 1.0.0.10
 （宿主在运行，用"先改名再写入"换掉被占用的 DLL，旧版留 `artifacts/backup-1.0.0.9.dll`，
 重启宿主后生效）。
+
+## 2026-11-22 21:45 · 1.0.0.11（LuckyPicker 联动广播）
+
+用户要求：与 LuckyPicker 项目联动，把它抽到的名字在 ClassIsland 上广播。
+
+勘察结论：LuckyPicker 是独立程序（`desktop/` WinForms 与 `wpf/` 两套），**没有 IPC、没有插件接口**，
+也不依赖 ClassIsland 运行。它能稳定对外提供的唯一事实是
+`%LOCALAPPDATA%\LuckyPicker\history.json`（`[{time,text,classId}]`，新记录插在数组最前，
+见 `desktop/History.cs` 的 `SaveLocked`）。所以联动只能做成"只读监听 + 指纹去重"，不去改它。
+
+实现：
+
+- `Features/Lucky/LuckyHistory.cs`（纯逻辑）：解析历史、`ExtractNames` 拆连抽
+  （`连抽： A、B、C`）、`FindNew` 增量判定并按时间正序返回、指纹 = 时间+内容+班级。
+  解析失败返回 **null** 而不是空列表——否则会被误当成"历史空了"而清掉已见集合、重复广播。
+- `LuckyBroadcastService`：订阅宿主 `PostMainTimerTicked` 按 `PollIntervalSeconds` 节流轮询；
+  读到新记录就用 `NotificationRequest` 广播（显式 Duration + 主动 Cancel，先关上一条再弹）。
+  首次读到文件时把已有记录全部标记已见（`SkipExistingOnStart`），开机不刷屏。
+- `LuckyConfig`（`lucky.json`，默认 **关闭**）：路径/间隔/时长/模板/标题/朗读/启动跳过。
+  **不提供设置页**——沿用用户对远程控制的要求，避免课堂误点。
+- CLI：`lucky.status`（只读）与 `lucky.announce --text ...`（写，需 `--yes`）。
+
+踩到的坑（教训值得记）：
+
+- 一开始把同一实例同时 `AddSingleton<IHostedService>` 又 `AddNotificationProvider<T>`，
+  而 `AddNotificationProvider` 内部就是 `AddHostedService<T>()`，DI 会造出第二个对象、
+  `PostMainTimerTicked` 订阅两次 ⇒ **每条抽选会广播两遍**。改回项目既有约定：
+  只调 `AddNotificationProvider<T>`（对照 `BellRegistration` 的注释）。
+- 既然 provider 不注册服务本身，CLI 侧改用
+  `IEnumerable<IHostedService>` 里挑 `ILuckyService`，而不是 `TryResolveInterface`（会拿不到实例）。
+
+验收：构建 0 错误、单测 **98/98**，其中 2 例直接读**本机真实的** LuckyPicker 历史文件
+（解析成功率、指纹唯一、模拟新抽选只返回新增那条）。实机 DLL 已换 1.0.0.11
+（md5 `7E312DFA…`，宿主当时未运行，重启即生效），`cex` 同步更新；cipx 300285 B。

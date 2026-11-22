@@ -4,6 +4,29 @@
 
 ## [未发布]
 
+## [1.0.0.11] - 2026-11-22
+
+### 新增
+
+- **LuckyPicker 联动广播**：LuckyPicker 抽到的名字现在会直接广播到 ClassIsland 主界面。
+  LuckyPicker 是独立程序、没有 IPC，所以这里只读监听它的 `history.json`
+  （`%LOCALAPPDATA%\LuckyPicker\history.json`，格式 `[{time,text,classId}]`，新记录插在最前），
+  用「时间+内容+班级」指纹去重后走宿主的提醒通道弹出，默认关、每 2 秒轮询一次。
+  连抽记录（`连抽： 张三、李四`）会自动拆出人名；`SkipExistingOnStart` 保证开机不会把整本历史播一遍。
+- **配置在 `lucky.json`**（无设置页，避免课堂上被误点）：可改轮询间隔、显示时长、播报模板、
+  遮罩标题、是否朗读、以及手工指定 `HistoryPath`（便携版 LuckyPicker）。
+- **CLI**：`cex lucky status` 查状态，`cex lucky announce --text "张三" --yes` 手动广播。
+
+### 修复
+
+- **档案编辑器里打开预备铃开关后，提前量改不动、开关又自己关掉**。
+  根因是控件在渲染时把 `IsAttachSettingsEnabled` 写成了 `false`，想让课间时段"不写回档案"——
+  但宿主的启用开关本身就绑定在这个字段上（IL 证据：`AttachedSettingsControlPresenter.UpdateSourceSettings`
+  直接读写 `IAttachedSettings.IsAttachSettingsEnabled`，且 `HasEnabledState=true`），于是开关被弹回、
+  输入框也被同一段逻辑锁死。现在控件**只读不写**：渲染不改 `settings` 任何字段，输入框始终可编辑，
+  课间时段只用说明文字告知不会响铃；`Refresh()` 也不再冲掉正在输入的数字。
+
+
 ## [1.0.0.10] - 2026-11-22
 
 ### 修复

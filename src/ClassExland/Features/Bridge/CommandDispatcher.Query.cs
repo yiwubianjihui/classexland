@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using ClassExland.Contracts;
 using ClassExland.Features.Bell;
+using Microsoft.Extensions.Logging;
 
 namespace ClassExland.Features.Bridge;
 
@@ -428,4 +429,64 @@ public sealed partial class CommandDispatcher
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }
+    /// <summary>
+    /// 取 LuckyPicker 联动服务实例。
+    /// AddNotificationProvider&lt;T&gt; 只做 AddHostedService&lt;T&gt;()、不注册 T 本身，
+    /// 所以从 IEnumerable&lt;IHostedService&gt; 里挑出那个类型，而不是 TryResolveInterface——
+    /// 后者会拿不到（或另造一个）实例。
+    /// </summary>
+    private object? ResolveLuckyService()
+    {
+        try
+        {
+            if (_sp.GetService(typeof(IEnumerable<Microsoft.Extensions.Hosting.IHostedService>)) is
+                IEnumerable<Microsoft.Extensions.Hosting.IHostedService> hosted)
+            {
+                foreach (var h in hosted)
+                {
+                    if (h is ClassExland.Features.Lucky.ILuckyService lucky) return lucky;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "解析 Lucky 服务失败。");
+        }
+        return null;
+    }
+    /// <summary>lucky.status：LuckyPicker 联动状态（是否启用、历史文件是否存在、已见记录数）。</summary>
+    private Task<CommandResult> QueryLuckyStatusAsync(CommandRequest r, CancellationToken ct)
+    {
+        using var doc = _store.ReadDocument(ConfigFiles.Lucky);
+        var data = new Dictionary<string, object?>
+        {
+            ["configured"] = _store.Exists(ConfigFiles.Lucky),
+            ["config"] = doc is null ? null : JsonSerializer.SerializeToElement(doc.RootElement)
+        };
+
+        // 同时给一份"实际生效"的默认值与真实文件路径，方便排查"为什么没广播"。
+        var defaultPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LuckyPicker", "history.json");
+        var configuredPath = doc is null ? "" : ReadString(doc.RootElement, "historyPath", "HistoryPath") ?? "";
+        var effective = string.IsNullOrWhiteSpace(configuredPath) ? defaultPath : configuredPath;
+        data["historyPath"] = effective;
+        data["historyExists"] = File.Exists(effective);
+        data["historySize"] = File.Exists(effective) ? new FileInfo(effective).Length : 0L;
+
+        var svc = ResolveLuckyService();
+        if (svc is not null)
+        {
+            var prop = svc.GetType().GetProperty("Status", BindingFlags.Public | BindingFlags.Instance);
+            var statusObj = prop?.GetValue(svc);
+            if (statusObj is not null)
+            {
+                try { data["serviceStatus"] = JsonSerializer.SerializeToElement(statusObj, statusObj.GetType()); }
+                catch { data["serviceStatus"] = statusObj.ToString(); }
+            }
+        }
+
+        return Task.FromResult(Ok(data));
+    }
+
 }

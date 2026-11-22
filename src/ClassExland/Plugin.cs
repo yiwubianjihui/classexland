@@ -5,6 +5,7 @@ using ClassExland.Features.Bell;
 using ClassExland.Features.Bridge;
 using ClassExland.Features.Duty;
 using ClassExland.Features.Layout;
+using ClassExland.Features.Lucky;
 using ClassExland.Features.Remote;
 using ClassExland.Infra;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,7 @@ public class Plugin : PluginBase
         services.AddDuty();
         services.AddLayout();
         services.AddRemoteSync();
+        services.AddLucky();
         services.AddCommandBridge();
     }
 }

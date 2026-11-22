@@ -106,5 +106,6 @@ public static class ConfigFiles
     public const string Layout = "layout.json";
     public const string Remote = "remote.json";
     public const string Bridge = "bridge.json";
+    public const string Lucky = "lucky.json";
     public const string CoreSnapshot = "classisland-snapshot.json";
 }

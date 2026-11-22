@@ -299,3 +299,23 @@ CLI 与远程指令队列共用同一命令层。令牌在插件首次启动时�
   "AuditLogPath": "audit.log"        // 写操作审计日志
 }
 ```
+## 7. `lucky.json` — LuckyPicker 联动（可选，默认关闭）
+
+把 LuckyPicker 抽到的名字广播到 ClassIsland。LuckyPicker 是独立程序、无 IPC，
+这里只读监听它的历史文件，详见 [LUCKY-PICKER.md](LUCKY-PICKER.md)。
+
+```jsonc
+{
+  "Enabled": false,                  // 总开关；默认关，打开后才读文件
+  "HistoryPath": "",                 // 留空 = %LOCALAPPDATA%\LuckyPicker\history.json
+  "PollIntervalSeconds": 2,          // 轮询间隔（1–600 秒）
+  "MaskDurationSeconds": 5,          // 顶部遮罩时长
+  "OverlayDurationSeconds": 12,      // 正文时长
+  "MessageTemplate": "本次抽到：{names}",
+  "MaskTitle": "幸运摇人",
+  "EnableSpeech": false,             // 是否朗读（走宿主语音引擎）
+  "SkipExistingOnStart": true        // 开机只播新抽选，不刷历史
+}
+```
+
+没有任何设置页：改文件即可，下一轮轮询自动生效。命令行见 `cex lucky status` / `cex lucky announce`。

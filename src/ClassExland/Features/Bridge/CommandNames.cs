@@ -86,6 +86,12 @@ public static class CommandNames
         public const string Set = "class.set";
     }
 
+    public static class Lucky
+    {
+        public const string Status = "lucky.status";
+        public const string Announce = "lucky.announce";
+    }
+
     public static class Profile
     {
         public const string List = "profile.list";
@@ -106,7 +112,8 @@ public static class CommandNames
         Migrate,
         Web.Start, Web.Stop,
         ClassState.Set,
-        Profile.Switch
+        Profile.Switch,
+        Lucky.Announce
     };
 
     /// <summary>高危命令，除 --yes 外还需 --confirm yes 二次确认。</summary>

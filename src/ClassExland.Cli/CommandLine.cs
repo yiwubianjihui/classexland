@@ -42,6 +42,7 @@ internal static class CommandCatalog
         "audit.list", "audit.export",
         "web.start", "web.stop", "web.status",
         "class.set",
+        "lucky.status", "lucky.announce",
         "profile.list", "profile.switch", "profile.current"
     };
 
@@ -218,6 +219,8 @@ internal static class CommandLine
           migrate                      旧插件配置迁移
           web start|stop|status        本机 loopback 管理页
           profile list|switch|current  多班级档案切换（switch 高危，需 --yes --confirm）
+          lucky status                  LuckyPicker 联动状态（历史文件是否存在、已见记录数）
+          lucky announce --text "张三"  在 ClassIsland 上广播一段文字（写操作，需 --yes）
           class set                    强制课堂状态（高危，需 --yes --confirm）
           version
 

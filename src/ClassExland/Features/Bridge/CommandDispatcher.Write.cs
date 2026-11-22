@@ -385,6 +385,21 @@ public sealed partial class CommandDispatcher
             : Fail(ExitCodes.Validation, $"轮询失败：{ReadStringKey(detail, "message")}", detail);
     }
 
+    /// <summary>lucky.announce：手动广播一段文本（试音/临时通知），不写任何配置。</summary>
+    private async Task<CommandResult> WriteLuckyAnnounceAsync(CommandRequest r, CancellationToken ct)
+    {
+        var text = GetArg(r, "text") ?? GetArg(r, "message") ?? GetArg(r, "names");
+        if (string.IsNullOrWhiteSpace(text))
+            return Fail(ExitCodes.Validation, "需要 --text <要广播的文字>");
+        if (!r.Apply) return Preview(new { action = "lucky announce", text });
+
+        var svc = ResolveLuckyService();
+        if (svc is null)
+            return Fail(ExitCodes.IpcUnavailable, "LuckyPicker 联动模块未加载");
+
+        var result = await TryInvokeAsync(svc, "AnnounceAsync", new object?[] { text }, ct).ConfigureAwait(false);
+        return Ok(new { announced = true, text, detail = result?.ToString() ?? "" });
+    }
     private async Task<CommandResult> WriteRemoteUploadAsync(CommandRequest r, CancellationToken ct)
     {
         if (!r.Apply) return Preview(new { action = "remote upload (上传本机现有配置)" });
