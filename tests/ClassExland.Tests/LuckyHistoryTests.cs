@@ -118,9 +118,24 @@ public class LuckyHistoryTests
         var cfg = LuckyConfig.Sanitize(null);
         Assert.False(cfg.Enabled);            // 默认不读别人的文件
         Assert.Equal(2, cfg.PollIntervalSeconds);
-        Assert.Equal("本次抽到：{names}", cfg.MessageTemplate);
-        Assert.Equal("幸运摇人", cfg.MaskTitle);
+        // 遮罩显示人名、正文才是「抽到了……」这句话
+        Assert.Equal("抽到了：{names}", cfg.OverlayTemplate);
+        Assert.False(string.IsNullOrEmpty(cfg.MaskLeftIcon));
         Assert.True(cfg.SkipExistingOnStart);
+    }
+
+    [Fact]
+    public void 正文模板可自定义()
+    {
+        var cfg = LuckyConfig.Sanitize(new LuckyConfig { OverlayTemplate = "恭喜 {names} 被抽中！" });
+        Assert.Equal("恭喜 {names} 被抽中！", cfg.OverlayTemplate);
+    }
+
+    [Fact]
+    public void 正文模板留空时回落到默认()
+    {
+        var cfg = LuckyConfig.Sanitize(new LuckyConfig { OverlayTemplate = "   " });
+        Assert.Equal("抽到了：{names}", cfg.OverlayTemplate);
     }
 
     [Theory]

@@ -42,7 +42,7 @@ internal static class CommandCatalog
         "audit.list", "audit.export",
         "web.start", "web.stop", "web.status",
         "class.set",
-        "lucky.status", "lucky.announce",
+        "lucky.status", "lucky.announce", "lucky.push",
         "profile.list", "profile.switch", "profile.current"
     };
 

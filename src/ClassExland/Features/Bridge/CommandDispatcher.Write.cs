@@ -400,6 +400,28 @@ public sealed partial class CommandDispatcher
         var result = await TryInvokeAsync(svc, "AnnounceAsync", new object?[] { text }, ct).ConfigureAwait(false);
         return Ok(new { announced = true, text, detail = result?.ToString() ?? "" });
     }
+
+    /// <summary>
+    /// lucky.push：LuckyPicker 抽完立刻推过来（带 id 去重）。
+    /// 与 announce 的区别是它幂等——同一个 id 重复推送只会广播一次，
+    /// 这样 LuckyPicker 可以放心重试，网络/管道抖动也不会播两遍。
+    /// </summary>
+    private async Task<CommandResult> WriteLuckyPushAsync(CommandRequest r, CancellationToken ct)
+    {
+        var text = GetArg(r, "text") ?? GetArg(r, "names");
+        var id = GetArg(r, "id") ?? "";
+        if (string.IsNullOrWhiteSpace(text))
+            return Fail(ExitCodes.Validation, "需要 --text <抽到的人名>");
+
+        var svc = ResolveLuckyService();
+        if (svc is null)
+            return Fail(ExitCodes.IpcUnavailable, "LuckyPicker 联动模块未加载");
+        if (!r.Apply) return Preview(new { action = "lucky push", text, id });
+
+        // 幂等：执行过的 id 直接返回 ok，调用方不必区分"已播过"和"刚播完"。
+        var result = await TryInvokeAsync(svc, "PushAsync", new object?[] { text, id }, ct).ConfigureAwait(false);
+        return Ok(new { pushed = true, text, id, detail = result?.ToString() ?? "" });
+    }
     private async Task<CommandResult> WriteRemoteUploadAsync(CommandRequest r, CancellationToken ct)
     {
         if (!r.Apply) return Preview(new { action = "remote upload (上传本机现有配置)" });

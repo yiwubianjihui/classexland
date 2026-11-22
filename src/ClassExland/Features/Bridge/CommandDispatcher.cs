@@ -126,6 +126,7 @@ public sealed partial class CommandDispatcher : ICommandDispatcher
             CommandNames.ClassState.Set => WriteClassSetAsync(r, ct),
             CommandNames.Lucky.Status => QueryLuckyStatusAsync(r, ct),
             CommandNames.Lucky.Announce => WriteLuckyAnnounceAsync(r, ct),
+            CommandNames.Lucky.Push => WriteLuckyPushAsync(r, ct),
             CommandNames.Profile.Switch => WriteProfileSwitchAsync(r, ct),
 
             _ => Task.FromResult(Fail(ExitCodes.Validation, $"未知命令：{command}"))

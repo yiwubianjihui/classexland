@@ -14,4 +14,7 @@ public interface ILuckyService
 
     /// <summary>手动广播一段文本（试用/命令行）。</summary>
     Task<string> AnnounceAsync(string text);
+
+    /// <summary>LuckyPicker 主动推送（幂等，同 id 只播一次）。</summary>
+    Task<string> PushAsync(string namesText, string id);
 }

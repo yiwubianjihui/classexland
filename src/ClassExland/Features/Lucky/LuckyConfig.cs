@@ -30,11 +30,14 @@ public sealed class LuckyConfig
     /// <summary>广播正文时长（秒）。</summary>
     public int OverlayDurationSeconds { get; set; } = 12;
 
-    /// <summary>广播文本模板，{names} 会替换成抽到的名字。</summary>
-    public string MessageTemplate { get; set; } = "本次抽到：{names}";
+    /// <summary>正文文案模板，{names} 会替换成抽到的名字（遮罩上直接显示人名）。</summary>
+    public string OverlayTemplate { get; set; } = "抽到了：{names}";
 
-    /// <summary>遮罩标题。</summary>
-    public string MaskTitle { get; set; } = "幸运摇人";
+    /// <summary>遮罩左侧图标（Fluent 图标字形）。</summary>
+    public string MaskLeftIcon { get; set; } = "\uE823";
+
+    /// <summary>遮罩右侧图标；留空则不显示右侧图标。</summary>
+    public string MaskRightIcon { get; set; } = "";
 
     /// <summary>是否朗读（走宿主已装的语音引擎）。</summary>
     public bool EnableSpeech { get; set; } = false;
@@ -49,8 +52,9 @@ public sealed class LuckyConfig
         c.PollIntervalSeconds = c.PollIntervalSeconds is < 1 or > 600 ? 2 : c.PollIntervalSeconds;
         c.MaskDurationSeconds = c.MaskDurationSeconds is < 1 or > 120 ? 5 : c.MaskDurationSeconds;
         c.OverlayDurationSeconds = c.OverlayDurationSeconds is < 1 or > 300 ? 12 : c.OverlayDurationSeconds;
-        c.MessageTemplate = string.IsNullOrWhiteSpace(c.MessageTemplate) ? "本次抽到：{names}" : c.MessageTemplate;
-        c.MaskTitle = string.IsNullOrWhiteSpace(c.MaskTitle) ? "幸运摇人" : c.MaskTitle;
+        c.OverlayTemplate = string.IsNullOrWhiteSpace(c.OverlayTemplate) ? "抽到了：{names}" : c.OverlayTemplate;
+        c.MaskLeftIcon = c.MaskLeftIcon ?? "\uE823";
+        c.MaskRightIcon = c.MaskRightIcon ?? "";
         return c;
     }
 

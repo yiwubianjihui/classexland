@@ -90,6 +90,7 @@ public static class CommandNames
     {
         public const string Status = "lucky.status";
         public const string Announce = "lucky.announce";
+        public const string Push = "lucky.push";
     }
 
     public static class Profile
@@ -113,7 +114,7 @@ public static class CommandNames
         Web.Start, Web.Stop,
         ClassState.Set,
         Profile.Switch,
-        Lucky.Announce
+        Lucky.Announce, Lucky.Push
     };
 
     /// <summary>高危命令，除 --yes 外还需 --confirm yes 二次确认。</summary>

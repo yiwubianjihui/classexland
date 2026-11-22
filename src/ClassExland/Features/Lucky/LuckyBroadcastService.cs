@@ -35,6 +35,7 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
 
     private readonly object _gate = new();
     private readonly HashSet<string> _known = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pushedIds = new(StringComparer.Ordinal);
     private bool _primed;
     private DateTime _lastPollAt = DateTime.MinValue;
     private string _lastHash = "";
@@ -98,6 +99,39 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
         {
             _logger.LogWarning(ex, "手动广播失败。");
             return "广播失败：" + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// LuckyPicker 主动推送的入口（幂等）。
+    /// LuckyPicker 抽完立刻经本机命名管道调用，省掉轮询那 0~2 秒的等待；
+    /// 同一个 id 重复推送只广播一次，管道抖动或重试都不会播两遍。
+    /// </summary>
+    public async Task<string> PushAsync(string namesText, string id)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(namesText)) return "内容为空，未广播";
+
+            lock (_gate)
+            {
+                if (!string.IsNullOrWhiteSpace(id) && !_pushedIds.Add(id))
+                    return "该抽选已广播过（id 重复）";
+                if (_pushedIds.Count > 200) _pushedIds.Clear();
+            }
+
+            var cfg = _store.Load();
+            Broadcast(cfg, namesText.Trim());
+            // 推送成功后把这条记录也计入"已见"，避免下一拍轮询再播一遍。
+            foreach (var n in LuckyHistory.ExtractNames(namesText))
+                _known.Add(LuckyHistory.Fingerprint(new LuckyHistoryEntry { Time = "", Text = n }));
+            await Task.CompletedTask;
+            return "已广播：" + namesText.Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "处理 LuckyPicker 推送失败。");
+            return "推送失败：" + ex.Message;
         }
     }
 
@@ -172,20 +206,25 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
         {
             var names = LuckyHistory.ExtractNames(entry.Text);
             if (names.Count == 0) continue;
-            var text = cfg.MessageTemplate.Replace("{names}", LuckyHistory.FormatNames(names));
-            Broadcast(cfg, text);
+            Broadcast(cfg, LuckyHistory.FormatNames(names));
         }
     }
 
-    private void Broadcast(LuckyConfig cfg, string text)
+    private void Broadcast(LuckyConfig cfg, string namesText)
     {
+        // 遮罩上要显示的是「人名」，正文才是「抽到了……」这句话——
+        // 之前遮罩写的是固定标题（幸运摇人），信息密度太低。
+        var names = LuckyHistory.ExtractNames(namesText);
+        var display = names.Count > 0 ? LuckyHistory.FormatNames(names) : namesText.Trim();
+        var overlay = BuildOverlayText(cfg, display);
+
         // CreateTwoIconsMask 内部会 new LucideIconSource（Avalonia 控件对象），
         // 只能在 UI 线程构造；本服务由 PostMainTimerTicked 驱动，所在线程不保证是 UI 线程
         // （实测抛过 "Call from invalid thread"）。统一 Post 到 UI 线程再发。
         try
         {
-            if (Dispatcher.UIThread.CheckAccess()) BroadcastCore(cfg, text);
-            else Dispatcher.UIThread.Post(() => BroadcastCore(cfg, text));
+            if (Dispatcher.UIThread.CheckAccess()) BroadcastCore(cfg, display, overlay);
+            else Dispatcher.UIThread.Post(() => BroadcastCore(cfg, display, overlay));
         }
         catch (Exception ex)
         {
@@ -193,7 +232,16 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
         }
     }
 
-    private void BroadcastCore(LuckyConfig cfg, string text)
+    /// <summary>正文文案：默认「抽到了：张三」，可用 {names} 自定义。</summary>
+    private static string BuildOverlayText(LuckyConfig cfg, string names)
+    {
+        var template = string.IsNullOrWhiteSpace(cfg.OverlayTemplate)
+            ? "抽到了：{names}"
+            : cfg.OverlayTemplate;
+        return template.Replace("{names}", names);
+    }
+
+    private void BroadcastCore(LuckyConfig cfg, string maskText, string overlayText)
     {
         try
         {
@@ -202,16 +250,19 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
 
             var request = new NotificationRequest
             {
+                // 遮罩 = 人名本身，字号由宿主模板决定，一眼就能看清抽到谁。
                 MaskContent = NotificationContent.CreateTwoIconsMask(
-                    cfg.MaskTitle,
-                    rightIcon: "\uE823",
+                    maskText,
+                    leftIcon: cfg.MaskLeftIcon,
+                    rightIcon: cfg.MaskRightIcon,
+                    hasRightIcon: !string.IsNullOrEmpty(cfg.MaskRightIcon),
                     factory: x =>
                     {
                         x.Duration = maskDuration;
-                        x.SpeechContent = cfg.EnableSpeech ? text : null;
+                        x.SpeechContent = cfg.EnableSpeech ? overlayText : null;
                     }),
                 OverlayContent = NotificationContent.CreateSimpleTextContent(
-                    text,
+                    overlayText,
                     x => x.Duration = overlayDuration)
             };
 
@@ -221,7 +272,7 @@ public sealed class LuckyBroadcastService : NotificationProviderBase, ILuckyServ
             _active = request;
             _activeCloseAt = DateTime.Now + overlayDuration + CloseGrace;
             ShowNotification(request);
-            _logger.LogInformation("已广播 LuckyPicker 抽选：{Text}", text);
+            _logger.LogInformation("已广播 LuckyPicker 抽选：{Mask} / {Overlay}", maskText, overlayText);
         }
         catch (Exception ex)
         {
