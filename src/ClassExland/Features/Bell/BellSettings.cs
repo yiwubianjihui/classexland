@@ -20,6 +20,19 @@ public enum PreNoticeOverflowPolicy
 }
 
 /// <summary>
+/// 单节课的预备铃模式。
+/// - Fixed：用固定提前量（PrepSeconds）。
+/// - ByBreak：按前一节课间时长自动算——10 分钟课间提前 2 分钟、15 分钟提前 3 分钟、无课间不响。
+/// - Off：无预备铃（这一节到上课时刻只切界面状态，不响铃、不发预告）。
+/// </summary>
+public enum BellPrepMode
+{
+    Fixed = 0,
+    ByBreak = 1,
+    Off = 2
+}
+
+/// <summary>
 /// bell.json 中的单条时间片配置。CLI 的 bell list/set/doctor 直接读写此结构：
 /// 根为 JSON 数组，每项 id / prepSeconds / enabled，prep 为 CLI 兼容别名（本模块以 prepSeconds 为真值）。
 /// </summary>
@@ -42,6 +55,11 @@ public sealed class BellSlotConfig
     [JsonPropertyName("subject")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Subject { get; set; }
+
+    /// <summary>null = 跟随全局默认模式；有值则这一节覆盖。</summary>
+    [JsonPropertyName("prepMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BellPrepMode? PrepMode { get; set; }
 }
 
 /// <summary>
@@ -54,6 +72,14 @@ public sealed class BellSlotSettings : IAttachedSettings
 {
     [JsonPropertyName("prepSeconds")]
     public int PrepSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// 这一节的预备铃模式。null = 跟随全局默认（旧档案没有这个字段，保持原行为）。
+    /// ByBreak = 按课间时长自动算；Off = 无预备铃；Fixed = 用上面的固定秒数。
+    /// </summary>
+    [JsonPropertyName("prepMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BellPrepMode? PrepMode { get; set; }
 
     /// <summary>
     /// 宿主的附加设置启用开关。默认 **开启**（与历史行为一致，避免旧档案静默失效）；
@@ -121,6 +147,8 @@ public sealed partial class BellSettings : ObservableRecipient
     private bool _enableBellSound = true;
     private string _bellSoundPath = "";
     private float _bellVolume = 0.8f;
+    private BellPrepMode _defaultPrepMode = BellPrepMode.Fixed;
+    private List<BellBreakPrepRule> _breakPrepRules = new(BellBreakPrepRule.Defaults);
     private List<BellSlotConfig> _slots = new();
 
     public BellSettings(IPluginPaths paths)
@@ -196,6 +224,19 @@ public sealed partial class BellSettings : ObservableRecipient
         get => _bellVolume;
         set => SetAndSave(ref _bellVolume, value);
     }
+
+    /// <summary>
+    /// 全局默认预备铃模式。Fixed=固定提前量（兼容旧行为）；ByBreak=按课间时长；Off=全体无预备铃。
+    /// 单节可通过档案附加设置或 bell.json 覆盖。
+    /// </summary>
+    public BellPrepMode DefaultPrepMode
+    {
+        get => _defaultPrepMode;
+        set => SetAndSave(ref _defaultPrepMode, value);
+    }
+
+    /// <summary>按课间时长算提前量的规则表（ByBreak 模式用）。</summary>
+    public IReadOnlyList<BellBreakPrepRule> BreakPrepRules => _breakPrepRules;
 
     /// <summary>每节课配置（bell.json 的 JSON 数组成员）。</summary>
     public IReadOnlyList<BellSlotConfig> Slots => _slots;
@@ -295,6 +336,8 @@ public sealed partial class BellSettings : ObservableRecipient
         _enableBellSound = true;
         _bellSoundPath = "";
         _bellVolume = 0.8f;
+        _defaultPrepMode = BellPrepMode.Fixed;
+        _breakPrepRules = new List<BellBreakPrepRule>(BellBreakPrepRule.Defaults);
     }
 
     /// <summary>供计算使用的选项快照（纯逻辑层不依赖本类）。</summary>
@@ -304,7 +347,9 @@ public sealed partial class BellSettings : ObservableRecipient
         ClassEndDelaySeconds = ClassEndDelaySeconds,
         PreNoticeLeadSeconds = PreNoticeLeadSeconds,
         PreNoticeOverflow = PreNoticeOverflow,
-        MakeupWindowSeconds = MakeupWindowSeconds
+        MakeupWindowSeconds = MakeupWindowSeconds,
+        PrepMode = DefaultPrepMode,
+        BreakPrepRules = _breakPrepRules
     };
 
     private void SetAndSave<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
@@ -398,6 +443,8 @@ public sealed partial class BellSettings : ObservableRecipient
         _enableBellSound = loaded.EnableBellSound;
         _bellSoundPath = loaded.BellSoundPath ?? "";
         _bellVolume = loaded.BellVolume;
+        _defaultPrepMode = loaded.DefaultPrepMode;
+        if (loaded.BreakPrepRules is { Count: > 0 }) _breakPrepRules = loaded.BreakPrepRules;
     }
 
     public void Save()
@@ -422,7 +469,9 @@ public sealed partial class BellSettings : ObservableRecipient
                 EnableHostStateOverride = _enableHostStateOverride,
                 EnableBellSound = _enableBellSound,
                 BellSoundPath = _bellSoundPath,
-                BellVolume = _bellVolume
+                BellVolume = _bellVolume,
+                DefaultPrepMode = _defaultPrepMode,
+                BreakPrepRules = _breakPrepRules
             };
             File.WriteAllText(_optionsPath, JsonSerializer.Serialize(options, JsonOptions));
         }
@@ -444,5 +493,7 @@ public sealed partial class BellSettings : ObservableRecipient
         public bool EnableBellSound { get; set; } = true;
         public string BellSoundPath { get; set; } = "";
         public float BellVolume { get; set; } = 0.8f;
+        public BellPrepMode DefaultPrepMode { get; set; } = BellPrepMode.Fixed;
+        public List<BellBreakPrepRule> BreakPrepRules { get; set; } = new(BellBreakPrepRule.Defaults);
     }
 }

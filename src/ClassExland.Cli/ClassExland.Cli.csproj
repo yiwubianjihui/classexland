@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>cex</AssemblyName>
     <RootNamespace>ClassExland.Cli</RootNamespace>
-    <Version>1.0.0.16</Version>
+    <Version>1.0.0.17</Version>
   </PropertyGroup>
 
 </Project>

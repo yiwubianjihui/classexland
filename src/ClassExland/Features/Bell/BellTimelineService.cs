@@ -211,13 +211,19 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
                 ? _settings.GetPrep(key)
                 : (attached.IsAttachSettingsEnabled ? attached.PrepSeconds : BellSettings.NoPrep);
 
+            // 模式：档案附加设置优先，其次 bell.json 的单节覆盖，最后全局默认。
+            var mode = attached?.PrepMode
+                       ?? _settings.Slots.FirstOrDefault(s => s.Id == key)?.PrepMode
+                       ?? _settings.DefaultPrepMode;
+
             slots.Add(new BellSlot(
                 key,
                 item.StartTime,
                 item.EndTime,
                 item.TimeType == 0 ? BellSlotKind.Class : BellSlotKind.Break,
                 prep,
-                null));
+                null,
+                mode));
         }
 
         _lastClassStart = slots.Where(s => s.Kind == BellSlotKind.Class)
@@ -232,7 +238,7 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
         _logger.LogInformation("已重建今日预备铃时间轴，共 {Count} 个事件。", _moments.Count);
     }
 
-    private static string BuildSignature(ClassPlan? plan)
+    private string BuildSignature(ClassPlan? plan)
     {
         if (plan == null) return "null";
         var changed = string.Join(",", plan.Classes.Select(c => c.IsChangedClass ? "1" : "0"));
@@ -248,10 +254,14 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             : string.Join(",", layouts
                 .Where(i => i.TimeType is 0 or 1)
                 .Select(i => i.GetAttachedObject<BellSlotSettings>(BellConstants.SlotAttachedGuid) is { IsAttachSettingsEnabled: true } s
-                    ? s.PrepSeconds.ToString()
+                    ? $"{s.PrepSeconds}/{(s.PrepMode?.ToString() ?? "g")}"
                     : "-"));
 
-        return $"{plan.Name}|{plan.TimeLayoutId}|{plan.IsOverlay}|{plan.OverlaySourceId}|{changed}|{attachedKeys}|{preps}";
+        // 全局默认模式与规则进签名：切 Fixed/ByBreak/Off 或改规则后，下一个 tick 立即重算。
+        var globalMode = _settings.DefaultPrepMode;
+        var ruleSig = string.Join(",", _settings.BreakPrepRules.Select(r => $"{r.BreakMinutes}:{r.PrepSeconds}"));
+
+        return $"{plan.Name}|{plan.TimeLayoutId}|{plan.IsOverlay}|{plan.OverlaySourceId}|{changed}|{attachedKeys}|{preps}|{globalMode}|{ruleSig}";
     }
 
     private void FireMakeup(DateTimeOffset now)
@@ -282,6 +292,9 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
             switch (moment.Kind)
             {
                 case BellMomentKind.PrepareBell:
+                case BellMomentKind.ClassOnNotice:
+                    // 预备铃或（无预备铃时的）正式上课都进入上课态。
+                    // 事件按时刻排序，同一节先 PrepareBell 后 ClassOnNotice，最终都是 OnClass，幂等。
                     state = VirtualTimeState.OnClass;
                     break;
                 case BellMomentKind.ClassEnd:
@@ -289,7 +302,7 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
                         ? VirtualTimeState.AfterSchool
                         : VirtualTimeState.Breaking;
                     break;
-                // 预告与正式上课仅提醒，不切换状态。
+                // 预告只提醒，不切换状态。
             }
         }
 
@@ -335,12 +348,18 @@ public sealed class BellTimelineService : IBellTimeline, IBellStateController, I
                 newRealState = VirtualTimeState.OnClass;
                 _sound.PlayBell();
                 break;
+            case BellMomentKind.ClassOnNotice:
+                // 无预备铃的节次没有 PrepareBell，靠正式上课事件把界面切到上课态，
+                // 同时触发 VirtualStateChanged → 布局模块取消上一节遗留的下课任务。
+                // 有预备铃的节次此时已是 OnClass，赋值幂等、不会重复广播。
+                newRealState = VirtualTimeState.OnClass;
+                break;
             case BellMomentKind.ClassEnd:
                 newRealState = IsLastClass(moment.TimeLayoutItemId)
                     ? VirtualTimeState.AfterSchool
                     : VirtualTimeState.Breaking;
                 break;
-            // 预告与正式上课仅提醒，不切换状态。
+            // 预告只提醒，不切换状态。
         }
 
         VirtualTimeState previous, current;

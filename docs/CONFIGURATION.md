@@ -56,6 +56,17 @@
 >
 > 显式关闭的节次用 `NoPrep(-1)` 表示"这一节不响"，不是回退到默认 120 秒。
 
+**预备铃模式（1.0.0.17 新增）**：每节可选 `Fixed / ByBreak / Off` 三种，档案编辑器的「预备铃（ClassExland）」
+附加设置里有下拉；单节设置优先于全局 `DefaultPrepMode`：
+
+| 模式 | 含义 |
+|---|---|
+| `Fixed` | 固定提前量（`prepSeconds` 秒），旧行为 |
+| `ByBreak` | 按前一节课间时长自动算：**10 分钟课间→提前 2 分钟、15 分钟→提前 3 分钟、不足 10 分钟或无课间→不响**；规则表在 `bell-options.json` 的 `BreakPrepRules` 可调 |
+| `Off` | 无预备铃：不响铃、不发预告；但这节课到点仍会把界面切到上课状态（正式上课由宿主原生提示） |
+
+无预备铃的节次照样生成「正式上课」事件用于切换界面状态，只是插件不再弹「现在正式上课」窗口。
+
 ### bell.json（每节课）
 
 ```jsonc
@@ -65,12 +76,13 @@
     "prepSeconds": 120,       // 该节提前量（0–600 秒）
     "enabled": true,
     "slot": "周一课表 · 第 3 节 09:40-10:20",  // 可读标签，仅用于展示
-    "subject": "数学"          // 可选
+    "subject": "数学",         // 可选
+    "prepMode": "ByBreak"      // 可选：Fixed | ByBreak | Off；缺省跟随全局
   }
 ]
 ```
 
-数组里没有的节次使用 `defaultPrepSeconds`。
+数组里没有的节次使用 `defaultPrepSeconds` 与全局 `DefaultPrepMode`。
 
 ### bell-options.json（全局）
 
@@ -85,7 +97,12 @@
   "EnableHostStateOverride": true,    // Harmony 全局覆盖：预备铃时即进入 OnClass
   "EnableBellSound": true,
   "BellSoundPath": "",                // 铃声文件路径；空表示不播放
-  "BellVolume": 0.8                   // 0.0–1.0
+  "BellVolume": 0.8,                  // 0.0–1.0
+  "DefaultPrepMode": "ByBreak",       // Fixed | ByBreak | Off（1.0.0.17 新增，默认 Fixed）
+  "BreakPrepRules": [                 // ByBreak 模式规则：课间≥N分钟 → 提前M秒
+    { "breakMinutes": 10, "prepSeconds": 120 },
+    { "breakMinutes": 15, "prepSeconds": 180 }
+  ]
 }
 ```
 

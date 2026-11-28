@@ -195,7 +195,7 @@ public partial class LayoutSettingsPage : SettingsPageBase
             }
 
             LoadToUi();
-            StatusText.Text = "已恢复默认：上课 Default 0.8/0.5，下课 offclass 1/0.7，延迟 60 秒。";
+            StatusText.Text = "已恢复默认：上课 Default 0.7/0.5，下课 offclass 1/0.7，延迟 60 秒。";
         }
         catch (Exception ex)
         {

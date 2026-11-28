@@ -75,8 +75,11 @@ public sealed class BellProfileWriter
         return _lastPreview;
     }
 
-    /// <summary>按预览写入档案。仅写我方字段，其他字段保持原样；写前保存快照以供回滚。</summary>
-    public bool Apply() => ApplyCore(disableHostNotifications: true);
+    /// <summary>
+    /// 按预览写入档案。仅写我方字段，其他字段保持原样；写前保存快照以供回滚。
+    /// 不再关闭宿主的正式上课/预备提醒开关——正式上课提示交还宿主原生，插件只管上课前。
+    /// </summary>
+    public bool Apply() => ApplyCore(disableHostNotifications: false);
 
     /// <summary>
     /// 只把每节课的提前量写进档案（我方附加设置），不改宿主自带的提醒开关。

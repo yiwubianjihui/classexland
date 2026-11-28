@@ -4,8 +4,8 @@ using ClassExland.Contracts;
 namespace ClassExland.Features.Layout;
 
 /// <summary>
-/// LayoutModule 的可配置参数。默认值完全沿用用户现有 Automations/Default.json 的行为：
-/// 上课紧凑布局 Default/0.8/0.5，下课完整布局 offclass/1/0.7。
+/// LayoutModule 的可配置参数。默认值：上课紧凑布局 Default/0.7/0.5，下课完整布局 offclass/1/0.7。
+/// 上课缩放 0.7 为 2026-11-28 用户要求（原 0.8）。
 /// </summary>
 public sealed class LayoutConfig
 {
@@ -15,7 +15,7 @@ public sealed class LayoutConfig
     /// <summary>上课（预备铃起）使用的组件配置名。</summary>
     public string ClassComponentConfig { get; set; } = "Default";
 
-    public double ClassScale { get; set; } = 0.8;
+    public double ClassScale { get; set; } = 0.7;
     public double ClassOpacity { get; set; } = 0.5;
 
     /// <summary>下课使用的组件配置名。</summary>
@@ -38,7 +38,7 @@ public sealed class LayoutConfig
         var c = raw ?? new LayoutConfig();
         c.ClassComponentConfig = string.IsNullOrWhiteSpace(c.ClassComponentConfig) ? "Default" : c.ClassComponentConfig.Trim();
         c.BreakComponentConfig = string.IsNullOrWhiteSpace(c.BreakComponentConfig) ? "offclass" : c.BreakComponentConfig.Trim();
-        c.ClassScale = Clamp(c.ClassScale, 0.1, 3.0, 0.8);
+        c.ClassScale = Clamp(c.ClassScale, 0.1, 3.0, 0.7);
         c.BreakScale = Clamp(c.BreakScale, 0.1, 3.0, 1.0);
         c.ClassOpacity = Clamp(c.ClassOpacity, 0.05, 1.0, 0.5);
         c.BreakOpacity = Clamp(c.BreakOpacity, 0.05, 1.0, 0.7);

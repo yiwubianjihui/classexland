@@ -25,6 +25,7 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
     private const int FallbackPrepSeconds = 120;
 
     private readonly TextBox _prepBox;
+    private readonly ComboBox _modeBox;
     private readonly TextBlock _hint;
     private bool _syncing;
 
@@ -44,19 +45,36 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             if (Settings is not null && !HasValidText()) Refresh();
         };
 
+        _modeBox = new ComboBox
+        {
+            Width = 180,
+            ItemsSource = new[]
+            {
+                new ModeItem(BellPrepMode.Fixed, "固定提前量"),
+                new ModeItem(BellPrepMode.ByBreak, "按课间时长（10分→2分 / 15分→3分）"),
+                new ModeItem(BellPrepMode.Off, "无预备铃")
+            },
+            SelectedIndex = 0
+        };
+        _modeBox.SelectionChanged += (_, _) => Commit();
+
         var row = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             VerticalAlignment = VerticalAlignment.Center
         };
+        row.Children.Add(_modeBox);
+        _prepLabel = new TextBlock { Text = "提前量", VerticalAlignment = VerticalAlignment.Center, Opacity = 0.75 };
+        row.Children.Add(_prepLabel);
         row.Children.Add(_prepBox);
-        row.Children.Add(new TextBlock
+        _secondsLabel = new TextBlock
         {
             Text = "秒",
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.75
-        });
+        };
+        row.Children.Add(_secondsLabel);
 
         _hint = new TextBlock
         {
@@ -69,7 +87,7 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
         var panel = new StackPanel { Spacing = 6 };
         panel.Children.Add(new TextBlock
         {
-            Text = "预备铃提前量",
+            Text = "预备铃",
             FontWeight = FontWeight.SemiBold
         });
         panel.Children.Add(row);
@@ -77,6 +95,14 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
         Content = panel;
 
         Refresh();
+    }
+
+    private readonly TextBlock _prepLabel;
+    private readonly TextBlock _secondsLabel;
+
+    private sealed record ModeItem(BellPrepMode Mode, string Label)
+    {
+        public override string ToString() => Label;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -111,6 +137,15 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
         _syncing = true;
         try
         {
+            var mode = settings?.PrepMode ?? BellPrepMode.Fixed;
+            _modeBox.SelectedIndex = mode switch
+            {
+                BellPrepMode.ByBreak => 1,
+                BellPrepMode.Off => 2,
+                _ => 0
+            };
+            ApplyModeVisibility(mode);
+
             if (!typing)
             {
                 var value = settings?.PrepSeconds ?? FallbackPrepSeconds;
@@ -150,10 +185,25 @@ public sealed class BellSlotSettingsControl : AttachedSettingsControlBase<BellSl
             return;
         }
 
+        // 模式下拉：null（跟随全局）与 Fixed 都显示为"固定提前量"，选下拉即显式写入。
+        if (_modeBox.SelectedItem is ModeItem item && settings.PrepMode != item.Mode)
+        {
+            settings.PrepMode = item.Mode;
+            ApplyModeVisibility(item.Mode);
+        }
+
         var clamped = Math.Clamp(value, MinPrepSeconds, MaxPrepSeconds);
         _prepBox.BorderBrush = null;
         if (settings.PrepSeconds != clamped)
             settings.PrepSeconds = clamped;
+    }
+
+    private void ApplyModeVisibility(BellPrepMode mode)
+    {
+        var showPrep = mode == BellPrepMode.Fixed;
+        _prepLabel.IsVisible = showPrep;
+        _prepBox.IsVisible = showPrep;
+        _secondsLabel.IsVisible = showPrep;
     }
 
     /// <summary>

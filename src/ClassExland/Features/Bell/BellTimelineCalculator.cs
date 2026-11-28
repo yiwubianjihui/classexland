@@ -18,7 +18,8 @@ public sealed record BellSlot(
     TimeSpan End,
     BellSlotKind Kind,
     int PrepSeconds,
-    string? Subject);
+    string? Subject,
+    BellPrepMode? Mode = null);
 
 /// <summary>时间轴计算选项（纯逻辑，可单测）。</summary>
 public sealed record BellTimelineOptions
@@ -28,6 +29,11 @@ public sealed record BellTimelineOptions
     public int PreNoticeLeadSeconds { get; init; } = 60;
     public PreNoticeOverflowPolicy PreNoticeOverflow { get; init; } = PreNoticeOverflowPolicy.ClipToMidpoint;
     public int MakeupWindowSeconds { get; init; } = 1800;
+
+    /// <summary>默认预备铃模式。Fixed 保持旧行为；ByBreak 按课间时长；Off 全体无预备铃。</summary>
+    public BellPrepMode PrepMode { get; init; } = BellPrepMode.Fixed;
+    /// <summary>ByBreak 模式的规则表。</summary>
+    public IReadOnlyList<BellBreakPrepRule>? BreakPrepRules { get; init; }
 }
 
 /// <summary>
@@ -53,20 +59,6 @@ public static class BellTimelineCalculator
         {
             if (slot.Kind != BellSlotKind.Class) continue;
 
-            // PrepSeconds 约定：-1 = 这一节显式关闭预备铃；0 = 提前量为 0；其余为秒数。
-            var prep = slot.PrepSeconds < 0 ? 0 : slot.PrepSeconds;
-            if (slot.PrepSeconds == BellSettings.NoPrep)
-            {
-                // 关掉的节次：只保留正式上课与下课两个事件，不响预备铃也不发预告。
-                result.Add(new BellMoment(At(day, slot.Start), BellMomentKind.ClassOnNotice,
-                    slot.Id, slot.Subject, 0));
-                result.Add(new BellMoment(At(day, slot.End + endDelay), BellMomentKind.ClassEnd,
-                    slot.Id, slot.Subject, 0));
-                continue;
-            }
-            var prepSpan = TimeSpan.FromSeconds(prep);
-            var noticeAt = slot.Start - prepSpan - lead;
-
             // 前一节到底是什么：课间 = 真的"下课"过，上课 = 连续上课段。
             var previousBreak = slots
                 .Where(s => s.Kind == BellSlotKind.Break && s.End <= slot.Start)
@@ -81,6 +73,40 @@ public static class BellTimelineCalculator
             // 前面并没有下课，插一条预备铃会在上课中间突然响，语义也不对。
             var afterBreak = previousBreak != null &&
                              (previousClass == null || previousBreak.End >= previousClass.End);
+
+            // 决定这一节的有效模式与提前量：单节覆盖 > 全局默认。
+            var mode = slot.Mode ?? options.PrepMode;
+            int prep;
+            if (mode == BellPrepMode.Off)
+            {
+                prep = BellSettings.NoPrep;
+            }
+            else if (mode == BellPrepMode.ByBreak)
+            {
+                // 按课间时长算：没有真正的前一节课间 → NoPrep（"没有课间则不触发"）。
+                var breakLength = afterBreak && previousBreak is not null
+                    ? previousBreak.End - previousBreak.Start
+                    : (TimeSpan?)null;
+                prep = BellBreakPrepRules.Resolve(breakLength, options.BreakPrepRules);
+            }
+            else
+            {
+                // Fixed：保持旧语义，-1=显式关闭（值为 0 表示提前量为 0）。
+                prep = slot.PrepSeconds < 0 ? BellSettings.NoPrep : slot.PrepSeconds;
+            }
+
+            if (prep == BellSettings.NoPrep)
+            {
+                // 无预备铃的节次：仍然生成"正式上课"事件——界面必须照常切到上课状态。
+                result.Add(new BellMoment(At(day, slot.Start), BellMomentKind.ClassOnNotice,
+                    slot.Id, slot.Subject, 0));
+                result.Add(new BellMoment(At(day, slot.End + endDelay), BellMomentKind.ClassEnd,
+                    slot.Id, slot.Subject, 0));
+                continue;
+            }
+
+            var prepSpan = TimeSpan.FromSeconds(prep);
+            var noticeAt = slot.Start - prepSpan - lead;
 
             if (afterBreak)
             {
