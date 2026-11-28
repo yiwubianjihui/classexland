@@ -61,10 +61,22 @@ public static class CoreConfigPolicy
     /// <summary>禁止远程出现的 JSON 键名片段（大小写不敏感，子串匹配，递归扫描）。</summary>
     public static readonly string[] ForbiddenKeyFragments =
     {
-        "credential", "password", "token", "secret", "apikey", "privatekey",
-        "policy", "debug", "update",
-        "pluginenabled", "enabledplugins", "ispluginenabled",
-        "themeprivate", "privatetheme"
+        "credential", "password", "token", "secret", "apikey", "privatekey"
+    };
+
+    /// <summary>合法宿主键例外（小写完整键名）：含敏感子串但属于宿主正常设置，不拒绝。
+    /// 例如通知语音的 SmgTokenSource 只是选择"用哪个语音源"，不含凭据值。</summary>
+    public static readonly string[] ForbiddenKeyExceptions =
+    {
+        "notificationspeechcustomsmgtokensource"
+    };
+
+    /// <summary>精确完整键名（小写）：只拒真正的调试/更新敏感键，
+    /// 不误伤 IsDebugEnabled / UpdateMode / SettingsPagesCachePolicy 等合法宿主设置。</summary>
+    public static readonly string[] ForbiddenKeyExact =
+    {
+        "debuggithubauthkey", "debugpublickeyoverride", "debugphainonrooturloverride",
+        "updateartifacthash"
     };
 
     /// <summary>禁止远程下发的命令名片段。</summary>
@@ -204,7 +216,10 @@ public static class CoreConfigPolicy
             case JsonValueKind.Object:
                 foreach (var prop in element.EnumerateObject())
                 {
-                    if (ContainsAny(prop.Name, ForbiddenKeyFragments)) return prop.Name;
+                    var lower = prop.Name.ToLowerInvariant();
+                    if (!ForbiddenKeyExceptions.Contains(lower) && ContainsAny(prop.Name, ForbiddenKeyFragments))
+                        return prop.Name;
+                    if (ForbiddenKeyExact.Contains(lower)) return prop.Name;
                     if (FindForbiddenKey(prop.Value) is { } found) return found;
                 }
                 break;

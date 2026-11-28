@@ -46,9 +46,13 @@ const CX_FORBIDDEN_NAME_FRAGMENTS = [
 /** 禁止出现的 JSON 键名片段（递归、大小写不敏感的子串匹配）。 */
 const CX_FORBIDDEN_KEY_FRAGMENTS = [
     'credential', 'password', 'token', 'secret', 'apikey', 'privatekey',
-    'policy', 'debug', 'update',
-    'pluginenabled', 'enabledplugins', 'ispluginenabled',
-    'themeprivate', 'privatetheme',
+];
+/** 合法宿主键例外：含敏感子串但属于宿主正常设置，不拒绝。 */
+const CX_FORBIDDEN_KEY_EXCEPTIONS = ['notificationspeechcustomsmgtokensource'];
+/** 精确完整键名（小写）：只拒真正的调试/更新敏感键，不误伤 IsDebugEnabled/UpdateMode 等合法宿主设置。 */
+const CX_FORBIDDEN_KEY_EXACT = [
+    'debuggithubauthkey', 'debugpublickeyoverride', 'debugphainonrooturloverride',
+    'updateartifacthash',
 ];
 
 function cx_boot(): void
@@ -448,9 +452,12 @@ function cx_is_forbidden_key(mixed $node, int $depth = 0): bool
     if (!is_array($node) || $depth > 32) return false;
     foreach ($node as $key => $value) {
         $k = strtolower((string)$key);
-        foreach (CX_FORBIDDEN_KEY_FRAGMENTS as $frag) {
-            if (strpos($k, $frag) !== false) return true;
+        if (!in_array($k, CX_FORBIDDEN_KEY_EXCEPTIONS, true)) {
+            foreach (CX_FORBIDDEN_KEY_FRAGMENTS as $frag) {
+                if (strpos($k, $frag) !== false) return true;
+            }
         }
+        if (in_array($k, CX_FORBIDDEN_KEY_EXACT, true)) return true;
         if (is_array($value) && cx_is_forbidden_key($value, $depth + 1)) return true;
     }
     return false;
