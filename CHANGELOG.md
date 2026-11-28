@@ -4,6 +4,23 @@
 
 ## [未发布]
 
+## [1.0.0.18] - 2026-11-28
+
+### 新增
+
+- **远程控制覆盖 ClassIsland 全部配置**：白名单从 4 个插件文件扩展到 6 个（新增 `bell-options.json` /
+  `lucky.json`），并新增 `snapshot.core` 通道同步 `Settings.json`、`Profiles/YBH.json`、
+  `Config/ComponentLayouts/{Default,offclass}.json`。协议见 `docs/PROTOCOL-CORE-SYNC.md`。
+- **即时备份 + 上传、家里合并**：本地配置变化先留痕（`Backups/changes/`）再上报服务器；
+  教室端不做字段级合并，由你在管理页看 diff 裁决，合并后的版本为权威。
+- **无冲突才自动覆盖**：本地有未上传变化时不再无条件覆盖；干净时覆盖前生成 diff 备份
+  （`Backups/diffs/`），失败即中止。core 条目 baseHash 不符时保留本地。
+
+### 修复
+
+- 服务端 HMAC 签名大小写归一化（修复 C# 客户端上传 401）、commit diff 读取错误字段导致历史 diff
+  恒显「新增」、etag 未纳入 head 可能漏同步。
+
 ## [1.0.0.17] - 2026-11-28
 
 ### 变更

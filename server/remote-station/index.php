@@ -5,6 +5,12 @@ require __DIR__ . '/lib.php';
 require __DIR__ . '/history.php';
 cx_boot();
 
+// 所有 POST 都会读-改-写 state/history：加锁到请求结束（exit 时由 shutdown 回调释放）。
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    cx_lock_store(CX_STATE_FILE);
+    cx_lock_store(CX_HISTORY_FILE);
+}
+
 session_name('cxstation');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax', 'path' => '/']);
 session_start();
@@ -67,6 +73,37 @@ function cx_require_login(bool $loggedIn): void
         http_response_code(403);
         exit('未登录。');
     }
+}
+
+/**
+ * 管理页可编辑字段：插件配置 + core（含几个常用空项，方便第一次添加）。
+ * 每项都是 [字段名, 原文]，字段名直接进 f_name[]，不改写成别的 form name。
+ */
+function cx_edit_fields(array $device): array
+{
+    $flat = cx_flat_snapshot($device);
+    $groups = ['plugins' => [], 'core' => []];
+
+    foreach (CX_ALLOWED_PLUGINS as $key) {
+        $groups['plugins'][] = [$key, $flat[$key] ?? ''];
+    }
+
+    $groups['core'][] = [CX_CORE_SETTINGS_TREE_KEY, $flat[CX_CORE_SETTINGS_TREE_KEY] ?? ''];
+
+    $profiles = is_array($device['core'][CX_CORE_PROFILES] ?? null)
+        ? array_keys($device['core'][CX_CORE_PROFILES]) : [];
+    foreach (array_values(array_unique(array_merge($profiles, ['YBH.json']))) as $name) {
+        $key = CX_CORE_PROFILES_PREFIX . $name;
+        $groups['core'][] = [$key, $flat[$key] ?? ''];
+    }
+
+    $layouts = is_array($device['core'][CX_CORE_LAYOUTS] ?? null)
+        ? array_keys($device['core'][CX_CORE_LAYOUTS]) : [];
+    foreach (array_values(array_unique(array_merge($layouts, ['Default.json', 'offclass.json']))) as $name) {
+        $key = CX_CORE_LAYOUTS_PREFIX . $name;
+        $groups['core'][] = [$key, $flat[$key] ?? ''];
+    }
+    return $groups;
 }
 
 /** 选中某台设备：写进 state，供刷新后保持。 */
@@ -177,17 +214,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dev['note']       = '复制自「' . $from . '」';
         $dev['created_at'] = date('Y-m-d H:i:s');
         $dev['files']      = $src['files'] ?? [];
+        $dev['core']       = $src['core'] ?? [];
         $dev['commands']   = $src['commands'] ?? [];
-        if (!empty($dev['files'])) {
+        $flat = cx_flat_snapshot($dev);
+        $baseHashes = cx_core_base_hashes($dev);
+        if ($flat) {
             // 复制出来的算一次新发布：有自己的版本与 etag，客户端才会认为有变化。
             $dev['version']    = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
             $dev['updated_at'] = date('Y-m-d H:i:s');
-            $dev['etag']       = substr(hash('sha256', cx_build_manifest($dev, $to)), 0, 12);
+            $head = cx_tree_hash($flat);
+            $dev['etag']       = substr(hash('sha256', cx_build_manifest($dev, $to, $head)), 0, 12);
         }
         $state['devices'][$to] = $dev;
         $state['selected'] = $to;
-        if (!empty($dev['files'])) {
-            cx_commit_snapshot($history, $to, $dev['files'], '复制自「' . $from . '」', '管理员', '');
+        if ($flat) {
+            cx_commit_snapshot($history, $to, $flat, '复制自「' . $from . '」', '管理员', '', $baseHashes);
             cx_save_history($history);
         }
         cx_save_state($state);
@@ -226,36 +267,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cx_redirect('设备不存在，未发布。');
         }
 
-        $files = [];
+        // 字段用平行数组 f_name[]/f_content[]，避免按文件名拼字段时 . / - 撞名。
+        $postNames = $_POST['f_name'] ?? [];
+        $postContents = $_POST['f_content'] ?? [];
+        if (!is_array($postNames) || !is_array($postContents)) {
+            cx_redirect('表单格式不合法，未发布。');
+        }
+        $flat = [];
         $errors = [];
-        foreach (CX_ALLOWED_KEYS as $key) {
-            $field = 'f_' . str_replace(['.', '-'], '_', $key);
-            $raw = trim((string)($_POST[$field] ?? ''));
-            if ($raw === '') {
+        foreach ($postNames as $i => $key) {
+            $key = (string)$key;
+            if (!cx_is_allowed_key($key)) {
+                $errors[] = $key . ' 不在白名单';
                 continue;
             }
+            $raw = trim((string)($postContents[$i] ?? ''));
+            if ($raw === '') continue;
             if (strlen($raw) > CX_MAX_BODY) {
-                $errors[] = $key . ' 超过 512 KB';
+                $errors[] = $key . ' 超过 2 MB';
                 continue;
             }
             if (!cx_is_json($raw)) {
                 $errors[] = $key . ' 不是合法 JSON';
                 continue;
             }
-            $files[$key] = $raw;
+            if (strpos($key, 'core.') === 0 && cx_json_has_forbidden_key($raw)) {
+                $errors[] = $key . ' 命中禁止键';
+                continue;
+            }
+            $flat[$key] = $raw;
         }
 
         if ($errors) {
             cx_redirect('未发布：' . implode('；', $errors));
         }
 
-        $version = cx_publish_files($state, $name, $files);
+        $head = cx_tree_hash($flat);
+        $version = cx_publish_files($state, $name, $flat, $head);
         $parent  = (string)($history['devices'][$name]['head'] ?? '');
-        cx_commit_snapshot($history, $name, $files, (string)($_POST['message'] ?? '管理页发布'), '管理员', $parent);
+        cx_commit_snapshot($history, $name, $flat, (string)($_POST['message'] ?? '管理页发布'), '管理员', $parent);
         if (!cx_save_state($state) || !cx_save_history($history)) {
             cx_redirect('写入状态失败，请检查 data 目录权限。');
         }
-        cx_log_request('publish', 200, $name . ' version=' . $version . ' files=' . count($files));
+        cx_log_request('publish', 200, $name . ' version=' . $version . ' files=' . count($flat));
         cx_redirect('已为「' . $name . '」发布版本 ' . $version . '，该设备下次同步即生效。');
     }
 
@@ -298,7 +352,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $state['devices'][$target]['updated_at'] = date('Y-m-d H:i:s');
             // 同时前进版本号：老客户端没有 command.php 轮询，仍能从清单里拿到指令。
             $state['devices'][$target]['version'] = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
-            $state['devices'][$target]['etag'] = substr(hash('sha256', cx_build_manifest($state['devices'][$target], $target)), 0, 12);
+            $targetHead = cx_tree_hash(cx_flat_snapshot($state['devices'][$target]));
+            $state['devices'][$target]['etag'] = substr(
+                hash('sha256', cx_build_manifest($state['devices'][$target], $target, $targetHead)), 0, 12
+            );
         }
         if (!cx_save_state($state)) cx_redirect('写入状态失败，请检查 data 目录权限。');
         cx_log_request('command_add', 200, implode(',', $targets) . ' ' . $command);
@@ -313,7 +370,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $state['devices'][$name]['commands'] = [];
         $state['devices'][$name]['version'] = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
         $state['devices'][$name]['updated_at'] = date('Y-m-d H:i:s');
-        $state['devices'][$name]['etag'] = substr(hash('sha256', cx_build_manifest($state['devices'][$name], $name)), 0, 12);
+        $clearHead = cx_tree_hash(cx_flat_snapshot($state['devices'][$name]));
+        $state['devices'][$name]['etag'] = substr(
+            hash('sha256', cx_build_manifest($state['devices'][$name], $name, $clearHead)), 0, 12
+        );
         cx_save_state($state);
         cx_log_request('command_clear', 200, $name);
         cx_redirect('「' . $name . '」的指令队列已清空。');
@@ -370,13 +430,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($target === null) cx_redirect('找不到这条待审上传。');
 
-        $files = [];
-        foreach (($target['tree'] ?? []) as $fileName => $hash) {
-            if (isset($history['blobs'][$hash])) $files[$fileName] = $history['blobs'][$hash];
-        }
+        // 待审上传的 tree 也是摊平视图（含 core 命名空间键），用 blob 还原后整份采用。
+        $targetTree = is_array($target['tree'] ?? null) ? $target['tree'] : [];
+        $flat = cx_commit_files($history, ['tree' => $targetTree]);
+        $baseHashes = is_array($target['baseHashes'] ?? null) ? $target['baseHashes'] : [];
         $parent = (string)($history['devices'][$name]['head'] ?? '');
-        $commit = cx_commit_snapshot($history, $name, $files, '采用待审上传：' . (string)($target['message'] ?? ''), '管理员', $parent);
-        cx_publish_files($state, $name, $files);
+        $head = cx_tree_hash($flat);
+        $commit = cx_commit_snapshot(
+            $history, $name, $flat,
+            '采用待审上传：' . (string)($target['message'] ?? ''), '管理员', $parent, $baseHashes
+        );
+        cx_publish_files($state, $name, $flat, $head, $baseHashes);
         $history['devices'][$name]['pending'] = array_values(array_filter(
             $history['devices'][$name]['pending'],
             static fn($p) => (string)($p['id'] ?? '') !== $id
@@ -407,10 +471,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($target === null) cx_redirect('找不到这个版本。');
 
-        $files = cx_commit_files($history, $target);
+        $flat = cx_commit_files($history, $target);
+        $baseHashes = is_array($target['baseHashes'] ?? null) ? $target['baseHashes'] : [];
         $parent = (string)($history['devices'][$name]['head'] ?? '');
-        $commit = cx_commit_snapshot($history, $name, $files, '回滚到 ' . substr($id, 0, 10), '管理员', $parent);
-        cx_publish_files($state, $name, $files);
+        $head = cx_tree_hash($flat);
+        $commit = cx_commit_snapshot(
+            $history, $name, $flat, '回滚到 ' . substr($id, 0, 10), '管理员', $parent, $baseHashes
+        );
+        cx_publish_files($state, $name, $flat, $head, $baseHashes);
         if (!cx_save_history($history) || !cx_save_state($state)) cx_redirect('写入失败，请检查 data 目录权限。');
         cx_log_request('rollback', 200, $name . ' -> ' . substr($id, 0, 10));
         cx_redirect('已回滚到该版本；这次回滚本身也是一条新提交，可以再滚回来。');
@@ -625,17 +693,25 @@ $hmac  = (string)$config['hmac_secret'];
   </section>
 
   <?php if ($device !== null): ?>
+  <?php $editFields = cx_edit_fields($device); ?>
   <section class="card">
     <h2>「<?= cx_h($selected) ?>」的配置快照</h2>
-    <p class="muted">留空的文件不会写进这份快照（该设备保持原样）。保存后生成新版本，这台设备下次同步时应用。</p>
+    <p class="muted">留空的文件不会写进这份快照（该设备保持原样）。core 项保存后由客户端按 baseHash 判断能否覆盖本地修改；这里发布会强制下发。保存后生成新版本，这台设备下次同步时应用。</p>
     <form method="post">
       <input type="hidden" name="csrf" value="<?= cx_h($csrf) ?>">
       <input type="hidden" name="action" value="publish">
       <input type="hidden" name="device" value="<?= cx_h($selected) ?>">
-      <?php foreach (CX_ALLOWED_KEYS as $key): ?>
-        <h3><?= cx_h($key) ?></h3>
-        <textarea name="f_<?= cx_h(str_replace(['.', '-'], '_', $key)) ?>"
-                  placeholder="留空表示不下发这个文件"><?= cx_h(isset($device['files'][$key]) ? cx_pretty((string)$device['files'][$key]) : '') ?></textarea>
+      <h3>插件配置</h3>
+      <?php foreach ($editFields['plugins'] as [$key, $raw]): ?>
+        <label><?= cx_h($key) ?></label>
+        <input type="hidden" name="f_name[]" value="<?= cx_h($key) ?>">
+        <textarea name="f_content[]" placeholder="留空表示不下发这个文件"><?= cx_h($raw !== '' ? cx_pretty($raw) : '') ?></textarea>
+      <?php endforeach; ?>
+      <h3>核心配置（ClassIsland）</h3>
+      <?php foreach ($editFields['core'] as [$key, $raw]): ?>
+        <label><?= cx_h($key) ?></label>
+        <input type="hidden" name="f_name[]" value="<?= cx_h($key) ?>">
+        <textarea name="f_content[]" placeholder="留空表示不下发这个文件"><?= cx_h($raw !== '' ? cx_pretty($raw) : '') ?></textarea>
       <?php endforeach; ?>
         <h3>说明（可选）</h3>
         <input type="text" name="message" placeholder="这次改了什么，例如：周一值日调整" maxlength="120">
@@ -703,7 +779,7 @@ $hmac  = (string)$config['hmac_secret'];
     <h2>版本历史（<?= cx_h($selected) ?>）</h2>
     <p class="muted">
       内容按 SHA-256 存成 blob，相同内容只存一份；每次变更生成一条带 parent 的提交与逐行 diff。
-      当前 tree 哈希：<code><?= cx_h(substr(cx_tree_hash($device['files'] ?? []), 0, 16)) ?>…</code>
+      当前 tree 哈希：<code><?= cx_h(substr(cx_tree_hash(cx_flat_snapshot($device)), 0, 16)) ?>…</code>
     </p>
     <?php if (empty($commits)): ?>
       <p class="muted">还没有提交。客户端上传第一次配置，或在上面「保存并发布」后就会出现。</p>

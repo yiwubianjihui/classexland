@@ -10,13 +10,18 @@ declare(strict_types=1);
  * 不传 device 时：只有一台设备就用那台；多台会返回 400 并列出可选设备名，
  * 避免"随便拿一份快照把自己配置覆盖了"。
  *
- * 返回：{"device","version","etag","snapshot":{"pluginConfigs":{...}},"commands":[...]}
+ * 返回：{"device","head","uploadPath","version","etag",
+ *        "snapshot":{"pluginConfigs":{...},"core":{...}|null},"commands":[...]}
+ * core 段对所有配置原文原样嵌入；老客户端不认该字段，会忽略。
  * 配了签名密钥时，额外返回 X-ClassExland-Signature = hex(hmac_sha256(密钥, 响应原文))。
  */
 
 require __DIR__ . '/lib.php';
 require __DIR__ . '/history.php';
 cx_boot();
+
+// 本端点会回写 last_seen / 访问日志；读-改-写加互斥锁。
+cx_lock_store(CX_STATE_FILE);
 
 try {
     $config = cx_load_config();
@@ -66,7 +71,7 @@ if ($deviceName === '') {
             'device'   => '',
             'version'  => '0',
             'etag'     => '0',
-            'snapshot' => ['pluginConfigs' => new stdClass()],
+            'snapshot' => ['pluginConfigs' => new stdClass(), 'core' => null],
             'commands' => [],
         ]);
     } else {
@@ -97,7 +102,8 @@ if (!isset($state['devices'][$deviceName])) {
 }
 
 $device = $state['devices'][$deviceName];
-$head   = cx_tree_hash($device['files'] ?? []);
+// head 覆盖插件配置 + core（命名空间键），与上传/base 比较用同一套算法。
+$head   = cx_tree_hash(cx_flat_snapshot($device));
 $body   = cx_build_manifest($device, $deviceName, $head);
 
 $sig = '';

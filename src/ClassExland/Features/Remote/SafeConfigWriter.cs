@@ -18,6 +18,9 @@ public sealed class SafeConfigWriter
         _paths = paths;
     }
 
+    /// <summary>备份根目录（changes/ 与 diffs/ 都在这里），供 diff 备份使用。</summary>
+    public string BackupDirectory => _paths.BackupDirectory;
+
     public static bool IsValidJson(string content)
     {
         if (string.IsNullOrWhiteSpace(content)) return false;

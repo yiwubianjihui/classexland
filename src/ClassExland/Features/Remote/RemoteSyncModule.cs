@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -50,6 +51,9 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
         // 命令层可能稍后由 AddCommandBridge 注册，这里用 IServiceProvider 安全解析，缺失也不抛。
         _dispatcher = serviceProvider.GetService(typeof(ICommandDispatcher)) as ICommandDispatcher;
     }
+
+    /// <summary>无冲突才覆盖的纯判定：轮询到新版本且本地相对基线干净时才下发。</summary>
+    public static bool ShouldApplySnapshot(bool needApply, bool localDirty) => needApply && !localDirty;
 
     // ---- IRemoteSyncService（反射契约：零参数）----
 
@@ -212,6 +216,19 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
             return report;
         }
 
+        // 无冲突才覆盖：手动/后台同步都先确认本地没有未上报改动。
+        // 空基线（首次安装）视为干净，否则新设备永远拿不到第一份快照。
+        var localBaseline = _state.LoadLocalHashes();
+        var localBefore = RemoteLocalSnapshot.HashAll(_paths);
+        if (RemoteLocalSnapshot.IsLocalDirty(localBaseline, localBefore))
+        {
+            var skip = RemoteLocalSnapshot.DescribeChanges(localBaseline, localBefore);
+            report.Add($"本地配置有未上报改动（{skip}），未覆盖；请先上传本地配置");
+            _audit.Log("apply-skip-local-dirty", skip, ok: false);
+            report.Ok = true;
+            return report;
+        }
+
         var applied = new List<ApplyFileResult>();
         try
         {
@@ -304,7 +321,15 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
                     }
 
                     var content = pair.Value.GetRawText();
-                    var result = _writer.ApplyFile(_paths.Get(fileName), content, validateJson: true);
+                    var path = _paths.Get(fileName);
+                    // C4：覆盖前 diff 备份；失败必须中止，不能留一个没有回滚依据的写入。
+                    if (!ConfigDiffBackup.WriteBeforeOverwrite(
+                            _paths.BackupDirectory, _audit, manifest.Version, path, content))
+                    {
+                        report.Add($"插件配置 {fileName}: diff 备份失败，已中止覆盖");
+                        throw new InvalidOperationException($"插件配置 diff 备份失败：{fileName}");
+                    }
+                    var result = _writer.ApplyFile(path, content, validateJson: true);
                     applied.Add(result);
                     report.Add($"插件配置 {fileName}: {result.Message}");
                     if (!result.Ok) throw new InvalidOperationException($"插件配置写入失败：{fileName} {result.Message}");
@@ -313,10 +338,14 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
                 // 6) ClassIsland 核心配置（备份-校验-原子写-冲突保留本地）
                 if (cfg.EnableCoreConfigSync)
                 {
-                    var core = _coreWriter.Apply(manifest.Snapshot.Core, ct);
+                    var core = _coreWriter.Apply(manifest.Snapshot.Core, manifest.Version, ct);
                     report.Add(core.Message);
                     foreach (var f in core.RolledBackFiles) report.RolledBack.Add(f);
                     if (!core.Ok) throw new InvalidOperationException(core.Message);
+
+                    // C7：核心配置落盘后通知宿主重载内存中的 Settings / Profile / 组件布局。
+                    // 服务热生效不产生 ApplyFileResult，必须单独看 HotApplied。
+                    if (core.HotApplied || core.Results.Any(r => r.Ok)) RefreshCoreRuntime();
                 }
 
                 // 快照是直接写文件的，运行时内存里仍是旧值；预备铃必须在这里热生效，
@@ -411,7 +440,7 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
             report.Ok = true;
             report.NeedApply = !upToDate;
             var localHashes = RemoteLocalSnapshot.HashAll(_paths);
-            report.LocalDirty = RemoteLocalSnapshot.HasChanges(_state.LoadLocalHashes(), localHashes);
+            report.LocalDirty = RemoteLocalSnapshot.IsLocalDirty(_state.LoadLocalHashes(), localHashes);
             report.Add(upToDate
                 ? $"已是最新版本 {manifest.Version}"
                 : $"发现新版本 {manifest.Version}（本地 {lastVersion}），可执行 remote.sync");
@@ -483,6 +512,74 @@ public sealed partial class RemoteSyncModule : IHostedService, IRemoteSyncServic
         {
             _audit.Log("bell-refresh-fail", ex.Message, ok: false);
         }
+    }
+
+    /// <summary>
+    /// C7：核心配置落盘后通知宿主重载内存。方法名与参数由
+    /// tools/probe_host_metadata.py 只读解析宿主 2.1.0.1 元数据确认，
+    /// 全部是 public 无参实例方法；解析不到就写审计说明「需重启宿主」，绝不臆造 API。
+    /// </summary>
+    private void RefreshCoreRuntime()
+    {
+        TryInvokeHostReload("ClassIsland.Services.SettingsService", "LoadSettingsAsync", "settings-reload");
+        TryInvokeHostReload("ClassIsland.Services.ProfileService", "LoadProfileAsync", "profile-reload");
+        TryInvokeHostReload("ClassIsland.Services.ComponentsService", "RefreshConfigs", "components-refresh");
+        TryInvokeHostReload("ClassIsland.Services.AutomationService", "RefreshConfigs", "automation-refresh");
+    }
+
+    private void TryInvokeHostReload(string typeFullName, string methodName, string label)
+    {
+        try
+        {
+            var type = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(SafeGetTypes)
+                .FirstOrDefault(t => string.Equals(t.FullName, typeFullName, StringComparison.Ordinal));
+            if (type is null)
+            {
+                _audit.Log(label + "-skip", $"宿主未加载 {typeFullName}；配置已写入磁盘，需重启宿主生效");
+                return;
+            }
+
+            var method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance,
+                binder: null, types: Type.EmptyTypes, modifiers: null);
+            if (method is null)
+            {
+                _audit.Log(label + "-skip", $"{typeFullName}.{methodName}() 不存在；需重启宿主生效");
+                return;
+            }
+
+            var service = HostServiceResolver.TryGet(type);
+            if (service is null)
+            {
+                _audit.Log(label + "-skip", $"宿主未注册 {typeFullName}；需重启宿主生效");
+                return;
+            }
+
+            var result = method.Invoke(service, null);
+            if (result is Task task)
+            {
+                _ = task.ContinueWith(t =>
+                    _audit.Log(label,
+                        t.IsFaulted ? $"重载失败：{t.Exception?.GetBaseException().Message}" : "宿主已重载",
+                        ok: !t.IsFaulted),
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
+            else
+            {
+                _audit.Log(label, "已调用宿主重载方法");
+            }
+        }
+        catch (Exception ex)
+        {
+            _audit.Log(label + "-fail", $"{ex.GetType().Name}: {ex.Message}；需重启宿主生效", ok: false);
+        }
+    }
+
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
+    {
+        try { return assembly.GetTypes(); }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null).Cast<Type>(); }
+        catch { return Array.Empty<Type>(); }
     }
 
     /// <summary>

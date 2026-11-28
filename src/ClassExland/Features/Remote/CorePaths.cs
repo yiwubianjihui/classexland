@@ -12,6 +12,7 @@ public sealed class CorePaths
     public string DataDirectory { get; }
     public string SettingsPath => Path.Combine(DataDirectory, "Settings.json");
     public string ProfilesDirectory => Path.Combine(DataDirectory, "Profiles");
+    public string ComponentLayoutsDirectory => Path.Combine(DataDirectory, "Config", "ComponentLayouts");
     public bool IsValid => !string.IsNullOrEmpty(DataDirectory)
                            && File.Exists(SettingsPath)
                            && Directory.Exists(ProfilesDirectory);

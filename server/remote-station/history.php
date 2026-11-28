@@ -14,7 +14,7 @@ declare(strict_types=1);
  */
 
 const CX_HISTORY_FILE = CX_DATA_DIR . '/history.php';
-const CX_MAX_COMMITS  = 40;      // 每台设备保留的最近提交数
+const CX_MAX_COMMITS  = 20;      // 每台设备保留的最近提交数（core 打开后 blob 变大，收一点）
 const CX_DIFF_LIMIT   = 3000;    // 超过这个行数只做整文件替换的摘要，避免 O(n*m) 爆掉
 
 function cx_default_history(): array
@@ -54,16 +54,45 @@ function cx_blob_hash(string $raw): string
     return hash('sha256', $raw);
 }
 
-/** 一次快照的整体哈希（Git tree 的简化版）：文件名排序后把 blob 哈希拼起来再哈希。 */
+/**
+ * 一次快照的整体哈希（Git tree 的简化版）：文件名排序后把 blob 哈希拼起来再哈希。
+ * $files 是摊平视图，键可能是插件文件名或 core 命名空间键。
+ * 与 PROTOCOL-CORE-SYNC 3.1 一致：sha256(json_encode(排序后的 name->sha256(原文)))。
+ */
 function cx_tree_hash(array $files): string
 {
     $pairs = [];
     foreach ($files as $name => $raw) {
-        if (!in_array($name, CX_ALLOWED_KEYS, true) || !is_string($raw) || trim($raw) === '') continue;
+        $name = (string)$name;
+        if (!cx_is_allowed_key($name) || !is_string($raw) || trim($raw) === '') continue;
         $pairs[$name] = cx_blob_hash($raw);
     }
     ksort($pairs, SORT_STRING);
     return hash('sha256', json_encode($pairs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
+/**
+ * diff 用的行序列：单行大 JSON 按顶层键切成一行一个键，避免整行替换。
+ * 解析失败或不是对象时降级为原文逐行。仅用于展示，不影响任何落盘原文。
+ */
+function cx_diff_lines(string $raw): array
+{
+    if (trim($raw) === '') return [];
+    $decoded = json_decode($raw, true);
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+        return preg_split('/\R/u', $raw) ?: [];
+    }
+    $keys = array_keys($decoded);
+    $isList = $decoded === [] || $keys === range(0, count($decoded) - 1);
+    if ($isList) {
+        return preg_split('/\R/u', $raw) ?: [];
+    }
+    $lines = [];
+    foreach ($decoded as $key => $value) {
+        $line = json_encode([(string)$key => $value], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $lines[] = $line === false ? (string)$key . ': <无法序列化>' : $line;
+    }
+    return $lines;
 }
 
 /**
@@ -72,8 +101,8 @@ function cx_tree_hash(array $files): string
  */
 function cx_text_diff(string $old, string $new, string $label = ''): string
 {
-    $a = preg_split('/\R/u', $old) ?: [];
-    $b = preg_split('/\R/u', $new) ?: [];
+    $a = cx_diff_lines($old);
+    $b = cx_diff_lines($new);
 
     if (count($a) > CX_DIFF_LIMIT || count($b) > CX_DIFF_LIMIT) {
         return "@@ 大文件，仅显示摘要 @@\n"
@@ -112,7 +141,7 @@ function cx_text_diff(string $old, string $new, string $label = ''): string
     while ($i < $n) { $ops[] = ['-', $a[$i++]]; }
     while ($j < $m) { $ops[] = ['+', $b[$j++]]; }
 
-    if (!$ops) return $label === '' ? "（无改动）\n" : "--- {$label}\n（无改动）\n";
+    if (!$ops) return '';
 
     // 只保留变化点前后 3 行的上下文，分段显示
     $keep = [];
@@ -122,14 +151,15 @@ function cx_text_diff(string $old, string $new, string $label = ''): string
         for ($k = max(0, $idx - 3); $k <= min(count($ops) - 1, $idx + 3); $k++) $show[$k] = true;
     }
 
-    $out = $label === '' ? '' : "--- {$label}\n";
+    $out = '';
     $oldLine = 1;
     $newLine = 1;
     $segment = [];
     $segOldStart = 1;
     $segNewStart = 1;
-    $flush = static function () use (&$segment, &$out, &$segOldStart, &$segNewStart): void {
+    $flush = static function () use (&$segment, &$out, &$segOldStart, &$segNewStart, $label): void {
         if (!$segment) return;
+        if ($out === '' && $label !== '') $out .= "--- {$label}\n";
         $out .= "@@ -{$segOldStart}," . count(array_filter($segment, static fn($l) => $l[0] !== '+'))
             . ' +' . "{$segNewStart}," . count(array_filter($segment, static fn($l) => $l[0] !== '-')) . " @@\n";
         foreach ($segment as $line) $out .= $line[0] . ' ' . $line[1] . "\n";
@@ -147,32 +177,47 @@ function cx_text_diff(string $old, string $new, string $label = ''): string
         if ($op[0] !== '-') $newLine++;
     }
     $flush();
-    return $out === '' ? "（无改动）\n" : $out;
+    return $out;
 }
 
 /**
  * 提交一次完整快照。返回新 commit。
- * $parent 为空表示根提交；调用方负责校验 base 是否等于当前 head。
+ *
+ * $flat      摊平视图：插件文件名 + core 命名空间键 => 原文。
+ * $parent    父「提交 id」；为空表示根提交。调用方负责校验 base 是否等于当前 head。
+ * $baseHashes core 条目的基准哈希映射，随提交保存，供回滚/采用待审时原样还原。
  */
-function cx_commit_snapshot(array &$history, string $device, array $files, string $message, string $author, string $parent): array
-{
+function cx_commit_snapshot(
+    array &$history,
+    string $device,
+    array $flat,
+    string $message,
+    string $author,
+    string $parent,
+    array $baseHashes = []
+): array {
     if (!isset($history['devices'][$device])) {
         $history['devices'][$device] = ['head' => '', 'commits' => [], 'pending' => []];
     }
 
     $tree = [];
-    foreach ($files as $name => $raw) {
-        if (!in_array($name, CX_ALLOWED_KEYS, true) || !is_string($raw) || trim($raw) === '') continue;
+    foreach ($flat as $name => $raw) {
+        $name = (string)$name;
+        if (!cx_is_allowed_key($name) || !is_string($raw) || trim($raw) === '') continue;
         $hash = cx_blob_hash($raw);
         $tree[$name] = $hash;
         $history['blobs'][$hash] = $raw; // 内容寻址：相同内容只存一份
     }
     ksort($tree, SORT_STRING);
 
+    // 父提交只有 tree（没有 files）：按 commit id 找回父提交，再用 blob 还原成原文。
     $oldFiles = [];
-    if ($parent !== '' && !empty($history['devices'][$device]['commits'])) {
+    if ($parent !== '') {
         foreach ($history['devices'][$device]['commits'] as $c) {
-            if (($c['id'] ?? '') === $parent) { $oldFiles = $c['files'] ?? []; break; }
+            if (($c['id'] ?? '') === $parent) {
+                $oldFiles = cx_commit_files($history, $c);
+                break;
+            }
         }
     }
 
@@ -181,7 +226,7 @@ function cx_commit_snapshot(array &$history, string $device, array $files, strin
         $old = (string)($oldFiles[$name] ?? '');
         $new = (string)($history['blobs'][$hash] ?? '');
         $d = cx_text_diff($old, $new, $name);
-        if ($d !== '' && $d !== "（无改动）\n") $diff[$name] = $d;
+        if ($d !== '') $diff[$name] = $d;
     }
     foreach ($oldFiles as $name => $raw) {
         if (!isset($tree[$name])) {
@@ -190,22 +235,24 @@ function cx_commit_snapshot(array &$history, string $device, array $files, strin
     }
 
     $seed = json_encode([
-        'parent'  => $parent,
-        'tree'    => $tree,
-        'message' => mb_substr($message, 0, 120),
-        'at'      => microtime(true),
-        'nonce'   => bin2hex(random_bytes(4)),
+        'parent'     => $parent,
+        'tree'       => $tree,
+        'baseHashes' => $baseHashes,
+        'message'    => mb_substr($message, 0, 120),
+        'at'         => microtime(true),
+        'nonce'      => bin2hex(random_bytes(4)),
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $id = hash('sha256', (string)$seed);
 
     $commit = [
-        'id'      => $id,
-        'parent'  => $parent,
-        'tree'    => $tree,
-        'diff'    => $diff,
-        'message' => mb_substr($message, 0, 120),
-        'author'  => mb_substr($author, 0, 40),
-        'at'      => date('Y-m-d H:i:s'),
+        'id'         => $id,
+        'parent'     => $parent,
+        'tree'       => $tree,
+        'baseHashes' => $baseHashes,
+        'diff'       => $diff,
+        'message'    => mb_substr($message, 0, 120),
+        'author'     => mb_substr($author, 0, 40),
+        'at'         => date('Y-m-d H:i:s'),
     ];
 
     $commits = $history['devices'][$device]['commits'];
@@ -239,7 +286,7 @@ function cx_gc_blobs(array &$history): void
 
 /**
  * 当前 head = 现有快照的 tree 哈希（内容寻址）。
- * 不用 commit id：回滚后内容可能和旧提交相同，用内容哈希做 base 比较才能正确快速合并。
+ * $currentFiles 是摊平视图；$history/$device 保留参数只为兼容旧调用点。
  */
 function cx_head_id(array $history, string $device, array $currentFiles): string
 {
@@ -256,15 +303,33 @@ function cx_commit_files(array $history, array $commit): array
     return $files;
 }
 
-/** 更新 state.php 里的当前快照（manifest 直接读它，保证旧协议不变）。 */
-function cx_publish_files(array &$state, string $device, array $files): string
-{
+/**
+ * 更新 state.php 里的当前快照（manifest 直接读它，保证旧协议不变）。
+ *
+ * $flat       摊平视图：插件文件名 + core 命名空间键 => 原文。
+ * $head       本次快照的 tree hash；etag 必须把它算进去（S4）。
+ * $baseHashes core 条目的基准哈希，随快照一起写回，供 manifest 下发。
+ */
+function cx_publish_files(
+    array &$state,
+    string $device,
+    array $flat,
+    string $head = '',
+    array $baseHashes = []
+): string {
     $version = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
-    $state['devices'][$device]['files'] = $files;
+    if (!isset($state['devices'][$device])) {
+        $state['devices'][$device] = cx_default_device();
+    }
+    cx_apply_snapshot($state['devices'][$device], $flat, $baseHashes);
     $state['devices'][$device]['version'] = $version;
     $state['devices'][$device]['updated_at'] = date('Y-m-d H:i:s');
+    if ($head === '') {
+        $head = cx_tree_hash($flat);
+    }
+    // etag = 完整 manifest 原文的前 12 位哈希，且必须包含 head。
     $state['devices'][$device]['etag'] = substr(
-        hash('sha256', cx_build_manifest($state['devices'][$device], $device)), 0, 12
+        hash('sha256', cx_build_manifest($state['devices'][$device], $device, $head)), 0, 12
     );
     $state['selected'] = $device;
     return $version;

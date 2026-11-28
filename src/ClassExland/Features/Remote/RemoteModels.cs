@@ -57,6 +57,10 @@ public sealed class CoreConfigSnapshot
     /// <summary>键为档案文件名（如 YBH.json），值为新内容与生成时哈希。</summary>
     [JsonPropertyName("profiles")]
     public Dictionary<string, CoreProfileEntry> Profiles { get; set; } = new();
+
+    /// <summary>键为组件布局文件名（Default.json / offclass.json），结构与 profiles 相同。</summary>
+    [JsonPropertyName("layouts")]
+    public Dictionary<string, CoreProfileEntry> Layouts { get; set; } = new();
 }
 
 public sealed class CoreProfileEntry

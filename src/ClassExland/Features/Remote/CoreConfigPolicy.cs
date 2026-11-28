@@ -15,7 +15,13 @@ namespace ClassExland.Features.Remote;
 /// </summary>
 public static class CoreConfigPolicy
 {
-    /// <summary>允许远程修改的顶层设置键（大小写不敏感，精确匹配）。</summary>
+    /// <summary>
+    /// 允许远程修改的 Settings.json 顶层键（大小写不敏感，精确匹配）。
+    /// ClassOnPreparingText / ClassOnMaskText / ClassOffMaskText / AttachedObjects /
+    /// IsClassOnPreparingNotificationEnabled / IsClassOnNotificationEnabled 属于档案
+    /// （Profile）的 AttachedObjects，不在 Settings.json 白名单内；档案本身是整份下发的，
+    /// 这些字段随档案生效，不需要也不允许从 Settings.json 合并。
+    /// </summary>
     public static readonly string[] AllowedSettingKeys =
     {
         "CurrentComponentConfig",
@@ -24,13 +30,18 @@ public static class CoreConfigPolicy
         "ComponentConfigs",
         "ClassPrepareNotifySeconds",
         "IsClassPrepareNotificationEnabled",
-        "IsClassOnPreparingNotificationEnabled",
-        "IsClassOnNotificationEnabled",
         "IsClassOffNotificationEnabled",
-        "ClassOnPreparingText",
-        "ClassOnMaskText",
-        "ClassOffMaskText",
-        "AttachedObjects"
+        "IsSwapMode",
+        "IsClassChangingNotificationEnabled",
+        "SingleWeekStartTime",
+        "MultiWeekRotationOffset",
+        "MultiWeekRotationMaxCycle",
+        "TimeLayoutEditorIndex",
+        "DefaultOnClassTimePointMinutes",
+        "DefaultBreakingTimePointMinutes",
+        "CountdownSeconds",
+        "IsNotificationEnabled",
+        "ShowExtraInfoOnTimePoint"
     };
 
     /// <summary>禁止远程下发的文件名模式（大小写不敏感，结尾 * 表示前缀匹配）。</summary>
@@ -93,6 +104,14 @@ public static class CoreConfigPolicy
                 if (FindForbiddenKey(pair.Value.Json) is { } key)
                     return PolicyResult.Fail($"档案 {pair.Key} 命中禁止键：{key}");
             }
+            foreach (var pair in core.Layouts)
+            {
+                if (pair.Value is null) continue;
+                var layoutKind = pair.Value.Json.ValueKind;
+                if (layoutKind is JsonValueKind.Undefined or JsonValueKind.Null) continue;
+                if (FindForbiddenKey(pair.Value.Json) is { } key)
+                    return PolicyResult.Fail($"组件布局 {pair.Key} 命中禁止键：{key}");
+            }
         }
 
         foreach (var command in manifest.Commands)
@@ -107,6 +126,39 @@ public static class CoreConfigPolicy
         }
 
         return PolicyResult.Pass();
+    }
+
+    /// <summary>
+    /// 上传方向的敏感键过滤：core 的原文（Settings / Profiles / Layouts）命中禁止键时
+    /// 整份拒绝上传，绝不把 token/secret 等字段发到服务器。只读扫描，不重新序列化原文。
+    /// </summary>
+    public static PolicyResult ValidateOutgoingCore(string settingsJson, IEnumerable<string> otherCoreTexts)
+    {
+        if (!string.IsNullOrWhiteSpace(settingsJson) &&
+            FindForbiddenKeyInText(settingsJson) is { } settingsKey)
+            return PolicyResult.Fail($"Settings.json 命中禁止键，拒绝上传：{settingsKey}");
+
+        foreach (var text in otherCoreTexts)
+        {
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            if (FindForbiddenKeyInText(text) is { } key)
+                return PolicyResult.Fail($"核心配置命中禁止键，拒绝上传：{key}");
+        }
+        return PolicyResult.Pass();
+    }
+
+    private static string? FindForbiddenKeyInText(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return FindForbiddenKey(doc.RootElement);
+        }
+        catch
+        {
+            // 解析失败时不做猜测；服务端会按原文拒收，这里不伪装成"干净"。
+            return "（JSON 解析失败）";
+        }
     }
 
     /// <summary>

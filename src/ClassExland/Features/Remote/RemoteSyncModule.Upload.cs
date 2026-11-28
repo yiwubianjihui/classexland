@@ -10,12 +10,12 @@ namespace ClassExland.Features.Remote;
 /// 双向同步的「上行」半边与周期轮询。
 ///
 /// 每个轮询周期：
-///   1. 拉清单看服务端有没有新版本 → 有就走原来的 SyncOnceAsync（下载、校验、备份、应用、指令）；
-///   2. 比对本地四个配置文件的 SHA-256 与上次同步时记下的指纹 → 有变化就 POST 上传；
+///   1. 拉清单看服务端有没有新版本；只有「本地干净」时才走 SyncOnceAsync（下载、校验、备份、应用、指令）；
+///   2. 比对本地六个插件配置 + 核心配置的 SHA-256 与上次同步指纹 → 有变化就先即时备份再 POST 上传；
 ///   3. 服务端用 base=head 判断是否快进；分叉时不覆盖当前快照，进待审队列由服务器裁决。
 ///
-/// 关键点：下载优先于上传。两边同时改过时先应用服务端版本，本地指纹随之更新，
-/// 不会再把自己刚收到的内容又传回去（避免回声循环）。
+/// 关键点：无冲突才覆盖。本地相对基线变脏时跳过服务端版本，先备份+上传，绝不把本地改动冲掉；
+/// 应用后重新计算指纹，避免把自己刚收到的内容又传回去（回声循环）。
 /// </summary>
 public sealed partial class RemoteSyncModule
 {
@@ -81,19 +81,38 @@ public sealed partial class RemoteSyncModule
             lock (_statusGate) { _busy = true; }
 
             var poll = await PollAsync(cfg, ct).ConfigureAwait(false);
-            if (poll.NeedApply)
+
+            // 无冲突才覆盖：本地相对基线变脏时绝不下载覆盖，先备份本地、上传，等收敛后再说。
+            if (ShouldApplySnapshot(poll.NeedApply, poll.LocalDirty))
             {
                 var applied = await SyncOnceAsync(cfg, ct).ConfigureAwait(false);
                 poll.Add(applied.Notes.Count > 0 ? applied.Notes[^1] : "已应用服务端新版本");
                 poll.Ok = applied.Ok;
             }
+            else if (poll.NeedApply && poll.LocalDirty)
+            {
+                poll.Add("本地配置相对上次同步已变更，跳过服务端覆盖，先备份并上传本地配置");
+                _audit.Log("apply-skip-local-dirty", $"server={poll.Version}，本地有未上传改动", ok: false);
+                if (!cfg.AutoUpload)
+                {
+                    var backed = ConfigDiffBackup.BackupChanges(
+                        _paths.BackupDirectory, RemoteLocalSnapshot.AllLocalPaths(_paths));
+                    poll.Add($"本地变更已即时备份 {backed.Count} 个文件（自动上传关闭，未上传）");
+                }
+            }
 
             if (cfg.AutoUpload)
             {
+                // 应用后基线已经更新，这里重算一次，避免把刚收到的版本又传回去（回声）。
+                var baseline = _state.LoadLocalHashes();
                 var hashes = RemoteLocalSnapshot.HashAll(_paths);
-                if (RemoteLocalSnapshot.HasChanges(_state.LoadLocalHashes(), hashes))
+                if (RemoteLocalSnapshot.IsLocalDirty(baseline, hashes))
                 {
-                    var summary = RemoteLocalSnapshot.DescribeChanges(_state.LoadLocalHashes(), hashes);
+                    var summary = RemoteLocalSnapshot.DescribeChanges(baseline, hashes);
+                    var backed = ConfigDiffBackup.BackupChanges(
+                        _paths.BackupDirectory, RemoteLocalSnapshot.AllLocalPaths(_paths));
+                    poll.Add($"本地变更即时备份：{backed.Count} 个文件");
+                    _audit.Log("changes-backup", $"备份 {backed.Count} 个文件（{summary}）", ok: backed.Count > 0);
                     var uploaded = await UploadLocalAsync(cfg, "自动上传：" + summary, ct).ConfigureAwait(false);
                     poll.LocalDirty = !uploaded.Ok;
                     poll.Add(uploaded.Message);
@@ -125,9 +144,26 @@ public sealed partial class RemoteSyncModule
         }
 
         var files = RemoteLocalSnapshot.ReadAll(_paths);
-        if (files.Count == 0)
+        var dataDirectory = new CorePaths(_paths).DataDirectory;
+        var coreFiles = RemoteLocalSnapshot.ReadCore(dataDirectory);
+        if (files.Count == 0 && coreFiles.Count == 0)
         {
-            result.Message = "本机还没有可上传的配置（bell/duty/activities/layout）";
+            result.Message = "本机还没有可上传的配置（六个插件配置或核心配置）";
+            return result;
+        }
+
+        // C2：上传方向的敏感键过滤。命中即整份拒绝，绝不把 Settings.json 里的 token 上传。
+        coreFiles.TryGetValue(RemoteLocalSnapshot.CoreSettingsKey, out var settingsEntry);
+        var settingsText = settingsEntry?.Text ?? "";
+        var settingsHash = settingsEntry?.Hash ?? "";
+        var otherCoreTexts = coreFiles
+            .Where(p => !string.Equals(p.Key, RemoteLocalSnapshot.CoreSettingsKey, StringComparison.Ordinal))
+            .Select(p => p.Value.Text);
+        var policy = CoreConfigPolicy.ValidateOutgoingCore(settingsText, otherCoreTexts);
+        if (!policy.Ok)
+        {
+            result.Message = policy.Error;
+            _audit.Log("upload-policy-reject", policy.Error, ok: false);
             return result;
         }
 
@@ -138,12 +174,37 @@ public sealed partial class RemoteSyncModule
 
         try
         {
+            // core 与 manifest 同结构：settingsJson/settingsBaseHash + profiles + layouts。
+            // 原文直接放进字符串，不重新序列化，保住宿主的 PascalCase 与空白。
+            object? core = null;
+            if (coreFiles.Count > 0)
+            {
+                var profiles = new Dictionary<string, object>(StringComparer.Ordinal);
+                var layouts = new Dictionary<string, object>(StringComparer.Ordinal);
+                foreach (var pair in coreFiles)
+                {
+                    var entry = new { json = pair.Value.Text, baseHash = pair.Value.Hash };
+                    if (pair.Key.StartsWith(RemoteLocalSnapshot.CoreProfilesPrefix, StringComparison.Ordinal))
+                        profiles[pair.Key[RemoteLocalSnapshot.CoreProfilesPrefix.Length..]] = entry;
+                    else if (pair.Key.StartsWith(RemoteLocalSnapshot.CoreLayoutsPrefix, StringComparison.Ordinal))
+                        layouts[pair.Key[RemoteLocalSnapshot.CoreLayoutsPrefix.Length..]] = entry;
+                }
+                core = new
+                {
+                    settingsJson = settingsText,
+                    settingsBaseHash = settingsHash,
+                    profiles,
+                    layouts
+                };
+            }
+
             var body = JsonSerializer.Serialize(new
             {
                 @base = _state.LoadHead(),
                 device = cfg.DeviceName,
                 message = message,
-                files = files
+                files = files,
+                core = core
             });
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(cfg.FetchTimeoutSeconds) };

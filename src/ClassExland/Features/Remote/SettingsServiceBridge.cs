@@ -68,17 +68,24 @@ public static class SettingsServiceBridge
                 return false;
             }
 
-            var save = service.GetType()
-                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => (m.Name == "SaveSettings" || m.Name == "Save") && m.GetParameters().Length == 0);
+            var methods = service.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance);
+            // 宿主 2.1 的 SaveSettings 是 1 参数 SaveSettings(string note)（已由
+            // tools/probe_host_metadata.py 只读核实）；老版本是 0 参数。两者都兼容。
+            var save = methods.FirstOrDefault(m =>
+                (m.Name == "SaveSettings" || m.Name == "Save") && m.GetParameters().Length == 0)
+                ?? methods.FirstOrDefault(m =>
+                    (m.Name == "SaveSettings" || m.Name == "Save") &&
+                    m.GetParameters().Length == 1 &&
+                    m.GetParameters()[0].ParameterType == typeof(string));
             if (save is null)
             {
-                message = "SettingsService 缺少 SaveSettings()";
+                message = "SettingsService 缺少 SaveSettings()/SaveSettings(note)";
                 return false;
             }
-            save.Invoke(service, null);
+            if (save.GetParameters().Length == 0) save.Invoke(service, null);
+            else save.Invoke(service, new object[] { "ClassExland 远程配置同步" });
 
-            message = $"已通过 SettingsService 反射应用 {changed} 个键并调用 SaveSettings()";
+            message = $"已通过 SettingsService 反射应用 {changed} 个键并调用 {save.Name}()";
             return true;
         }
         catch (Exception ex)
